@@ -1,6 +1,7 @@
 output/
 *.raw
 *.zip
+*.tar.xz
 work/
 .DS_Store
 # Keep flash assets tracked

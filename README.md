@@ -63,12 +63,15 @@ sudo ./scripts/build-all.sh gnome
 
 ## Flashing
 
-Put the device into fastboot mode, then:
+Download the variant you want from
+[Releases](https://github.com/PAD6-DEV/Ubuntu-pipa/releases) (each desktop is
+a separate `.tar.xz`), then:
 
 ```bash
-cd output/ubuntu-pipa-gnome-*/
+tar -xJf ubuntu-pipa-gnome-YYYYMMDD.tar.xz
+cd ubuntu-pipa-gnome-YYYYMMDD
 
-# Single-boot (overwrites Android userdata)
+# Put the device into fastboot mode, then:
 ./flash.sh
 
 # Multiboot (rootfs to a dedicated partition, default: linux)

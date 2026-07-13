@@ -335,10 +335,16 @@ EOF
 echo "=== Generating checksums ==="
 (cd "$OUTPUT_DIR" && sha256sum -- *.raw *.img *.sh BUILDINFO.txt > SHA256SUMS)
 
-echo "=== Creating ZIP archive ==="
-(cd "$OUTPUT_DIR" && zip -r "../$IMAGE_NAME.zip" .)
+ARCHIVE="$REPO_ROOT/output/${IMAGE_NAME}.tar.xz"
+echo "=== Creating tar.xz archive: $ARCHIVE ==="
+# Top-level directory inside the archive so extract creates IMAGE_NAME/
+tar -C "$REPO_ROOT/output" -cvf - "$IMAGE_NAME" | xz -T0 -9 > "$ARCHIVE"
+(
+    cd "$REPO_ROOT/output"
+    sha256sum -- "$(basename "$ARCHIVE")" > "${IMAGE_NAME}.tar.xz.sha256"
+)
 
 echo ""
 echo "=== Done! ==="
-echo "Output: $OUTPUT_DIR/"
-echo "ZIP:    $REPO_ROOT/output/$IMAGE_NAME.zip"
+echo "Output:  $OUTPUT_DIR/"
+echo "Archive: $ARCHIVE"
