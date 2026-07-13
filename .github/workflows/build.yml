@@ -1,0 +1,38 @@
+name: Build Ubuntu pipa images
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  image:
+    name: Build images
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build builder image
+        run: docker build -t ubuntu-pipa-builder .
+
+      - name: Build GNOME and Plasma images
+        run: |
+          mkdir -p output
+          docker run --rm --privileged \
+            -v "$PWD/output:/build/output" \
+            -v /dev:/dev \
+            -e BUILD_VARIANTS="gnome plasma" \
+            -e BUILD_GIT_REV="${{ github.sha }}" \
+            -e PIPA_PKGS_URL="https://thespider2.github.io/pipa-pkgs/repo/ubuntu/" \
+            ubuntu-pipa-builder
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-pipa-images
+          path: |
+            output/*.zip
+            output/*/BUILDINFO.txt
+            output/*/SHA256SUMS
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,0 +1,8 @@
+# GNOME desktop variant
+ubuntu-desktop
+gdm3
+zenity
+firefox
+libreoffice-writer
+libreoffice-calc
+plymouth-theme-ubuntu-logo

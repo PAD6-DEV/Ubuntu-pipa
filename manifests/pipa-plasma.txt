@@ -1,0 +1,8 @@
+# Plasma / Kubuntu desktop variant
+kubuntu-desktop
+sddm
+kdialog
+firefox
+libreoffice-writer
+libreoffice-calc
+plymouth-theme-ubuntu-logo

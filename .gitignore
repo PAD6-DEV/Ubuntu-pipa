@@ -1,0 +1,8 @@
+output/
+*.raw
+*.zip
+work/
+.DS_Store
+# Keep flash assets tracked
+!assets/
+!assets/**
