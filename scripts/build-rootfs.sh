@@ -31,9 +31,29 @@ VARIANT_PKGS="$(read_pkg_list "$REPO_ROOT/manifests/pipa-${VARIANT}.txt")"
 INCLUDE_PKGS="${COMMON_PKGS},${VARIANT_PKGS}"
 
 WORK="$(mktemp -d)"
+BOOTSTRAP="$WORK/bootstrap"
 ROOT="$WORK/root"
-mkdir -p "$ROOT" "$(dirname "$OUT_IMG")"
-trap 'umount -R "$ROOT" 2>/dev/null || true; losetup -d "$LOOP" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+LOOP=""
+mkdir -p "$BOOTSTRAP" "$ROOT" "$(dirname "$OUT_IMG")"
+
+cleanup() {
+    umount -R "$ROOT" 2>/dev/null || true
+    if [ -n "${LOOP}" ] && [ -b "$LOOP" ]; then
+        losetup -d "$LOOP" 2>/dev/null || true
+    fi
+    rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+echo "=== mmdebstrap $SUITE ($VARIANT) into empty tree ==="
+# mmdebstrap requires an empty target directory — do not mount disks first.
+mmdebstrap \
+    --arch=arm64 \
+    --variant=apt \
+    --components=main,universe,multiverse,restricted \
+    --include="systemd,systemd-sysv,dbus,apt-utils,ca-certificates,sudo,locales" \
+    --skip=cleanup/apt/lists \
+    "$SUITE" "$BOOTSTRAP" "$MIRROR"
 
 echo "=== Creating ${IMAGE_SIZE_GIB}GiB disk image ==="
 rm -f "$OUT_IMG"
@@ -41,17 +61,21 @@ truncate -s "${IMAGE_SIZE_GIB}G" "$OUT_IMG"
 
 # GPT: ESP 512MiB, boot 1GiB, root remainder
 sgdisk -Z "$OUT_IMG" >/dev/null
-sgdisk -n 1:0:+512M -t 1:EF00 -c 1:ESP "$OUT_IMG"
-sgdisk -n 2:0:+1G -t 2:8300 -c 2:boot "$OUT_IMG"
-sgdisk -n 3:0:0 -t 3:8300 -c 3:root "$OUT_IMG"
+sgdisk -n 1:0:+512M -t 1:EF00 -c 1:ESP "$OUT_IMG" >/dev/null
+sgdisk -n 2:0:+1G -t 2:8300 -c 2:boot "$OUT_IMG" >/dev/null
+sgdisk -n 3:0:0 -t 3:8300 -c 3:root "$OUT_IMG" >/dev/null
 
 LOOP=$(losetup --find --show --partscan "$OUT_IMG")
 partprobe "$LOOP" 2>/dev/null || true
-# Wait for partition nodes
-for _ in $(seq 1 20); do
-    [ -b "${LOOP}p1" ] && [ -b "${LOOP}p3" ] && break
+for _ in $(seq 1 30); do
+    [ -b "${LOOP}p1" ] && [ -b "${LOOP}p2" ] && [ -b "${LOOP}p3" ] && break
     sleep 0.2
 done
+if [ ! -b "${LOOP}p1" ] || [ ! -b "${LOOP}p3" ]; then
+    echo "ERROR: loop partitions not found for $LOOP"
+    ls -l "${LOOP}"* || true
+    exit 1
+fi
 
 ESP_PART="${LOOP}p1"
 BOOT_PART="${LOOP}p2"
@@ -63,24 +87,15 @@ MKE2FS_DEVICE_PHYS_SECTSIZE=4096 MKE2FS_DEVICE_SECTSIZE=4096 \
 MKE2FS_DEVICE_PHYS_SECTSIZE=4096 MKE2FS_DEVICE_SECTSIZE=4096 \
     mkfs.ext4 -F -L ub-pipa "$ROOT_PART"
 
-# Mount root, then boot, then create EFI dir on the boot fs (not under root
-# where it would be hidden by the /boot mount), then mount ESP.
+# Mount root → boot → efi (create efi dir on the boot filesystem)
 mount "$ROOT_PART" "$ROOT"
 mkdir -p "$ROOT/boot"
 mount "$BOOT_PART" "$ROOT/boot"
 mkdir -p "$ROOT/boot/efi"
 mount "$ESP_PART" "$ROOT/boot/efi"
 
-echo "=== mmdebstrap $SUITE ($VARIANT) ==="
-# Prefer apt packages from Ubuntu; pipa packages installed in a second pass
-# so a missing remote repo does not fail the entire bootstrap.
-mmdebstrap \
-    --arch=arm64 \
-    --variant=apt \
-    --components=main,universe,multiverse,restricted \
-    --include="systemd,systemd-sysv,dbus,apt-utils,ca-certificates,sudo,locales" \
-    --skip=cleanup/apt/lists \
-    "$SUITE" "$ROOT" "$MIRROR"
+echo "=== Copying bootstrap tree onto disk image ==="
+rsync -aHAX --numeric-ids "$BOOTSTRAP"/ "$ROOT"/
 
 # Bind mounts for chroot package installs
 mount --bind /dev "$ROOT/dev"
@@ -122,7 +137,6 @@ for pkg in "${PKG_ARR[@]}"; do
     skip=0
     for opt in "${OPTIONAL_PKGS[@]}"; do
         if [ "$pkg" = "$opt" ]; then
-            # Try later; don't fail bootstrap if absent
             INSTALL_PKGS+=("$pkg")
             skip=1
             break
@@ -133,7 +147,6 @@ for pkg in "${PKG_ARR[@]}"; do
 done
 
 echo "=== Installing packages (${#INSTALL_PKGS[@]}) ==="
-# Noninteractive
 export DEBIAN_FRONTEND=noninteractive
 chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get install -y \
     -o Dpkg::Options::="--force-confnew" \
@@ -201,14 +214,13 @@ rm -rf "$ROOT/var/cache/apt/archives"/*.deb
 rm -f "$ROOT/etc/machine-id" "$ROOT/var/lib/dbus/machine-id"
 : > "$ROOT/etc/machine-id"
 
-umount "$ROOT/boot/efi"
-umount "$ROOT/boot"
-# unmount bind mounts
+umount "$ROOT/run" 2>/dev/null || true
+umount "$ROOT/sys" 2>/dev/null || true
+umount "$ROOT/proc" 2>/dev/null || true
 umount "$ROOT/dev/pts" 2>/dev/null || true
 umount "$ROOT/dev" 2>/dev/null || true
-umount "$ROOT/proc" 2>/dev/null || true
-umount "$ROOT/sys" 2>/dev/null || true
-umount "$ROOT/run" 2>/dev/null || true
+umount "$ROOT/boot/efi"
+umount "$ROOT/boot"
 umount "$ROOT"
 
 losetup -d "$LOOP"
