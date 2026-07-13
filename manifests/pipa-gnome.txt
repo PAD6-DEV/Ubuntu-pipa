@@ -5,4 +5,3 @@ zenity
 firefox
 libreoffice-writer
 libreoffice-calc
-plymouth-theme-ubuntu-logo

@@ -110,7 +110,12 @@ deb $MIRROR $SUITE-updates main universe multiverse restricted
 deb $MIRROR $SUITE-security main universe multiverse restricted
 EOF
 
-mkdir -p "$ROOT/etc/apt/sources.list.d" "$ROOT/etc/apt/preferences.d"
+mkdir -p "$ROOT/etc/apt/sources.list.d" "$ROOT/etc/apt/preferences.d" "$ROOT/etc/apt/apt.conf.d"
+# Avoid Translation-en 404 noise from flat GitHub Pages repos
+cat > "$ROOT/etc/apt/apt.conf.d/99-no-languages" <<'EOF'
+Acquire::Languages "none";
+EOF
+
 cat > "$ROOT/etc/apt/sources.list.d/pipa-pkgs.list" <<EOF
 deb [trusted=yes] $PIPA_PKGS_URL ./
 EOF
@@ -128,45 +133,54 @@ EOF
 
 chroot "$ROOT" apt-get update
 
-# Install desktop + shared packages; tolerate missing optional qc tools
+# Optional packages: try if available, never fail the build
+OPTIONAL_PKGS=(
+    qrtr-tools rmtfs tqftpserv pd-mapper tuned tuned-ppd
+    plymouth plymouth-theme-spinner
+)
+
+# Required install set from manifests (exclude comments already stripped)
 IFS=',' read -ra PKG_ARR <<< "$INCLUDE_PKGS"
-INSTALL_PKGS=()
-OPTIONAL_PKGS=(qrtr-tools rmtfs tqftpserv pd-mapper tuned tuned-ppd plymouth-theme-kubuntu-logo)
+
+pkg_available() {
+    local pkg="$1"
+    chroot "$ROOT" apt-cache show "$pkg" >/dev/null 2>&1
+}
+
+REQUIRED_PKGS=()
+MISSING_REQUIRED=()
 for pkg in "${PKG_ARR[@]}"; do
     [ -n "$pkg" ] || continue
-    skip=0
-    for opt in "${OPTIONAL_PKGS[@]}"; do
-        if [ "$pkg" = "$opt" ]; then
-            INSTALL_PKGS+=("$pkg")
-            skip=1
-            break
-        fi
-    done
-    [ "$skip" -eq 1 ] && continue
-    INSTALL_PKGS+=("$pkg")
+    if pkg_available "$pkg"; then
+        REQUIRED_PKGS+=("$pkg")
+    else
+        MISSING_REQUIRED+=("$pkg")
+    fi
 done
 
-echo "=== Installing packages (${#INSTALL_PKGS[@]}) ==="
+if [ "${#MISSING_REQUIRED[@]}" -gt 0 ]; then
+    echo "ERROR: required packages not found in apt:"
+    printf '  - %s\n' "${MISSING_REQUIRED[@]}"
+    echo "Ensure pipa-pkgs Ubuntu debs are published at:"
+    echo "  $PIPA_PKGS_URL"
+    exit 1
+fi
+
+echo "=== Installing packages (${#REQUIRED_PKGS[@]}) ==="
 export DEBIAN_FRONTEND=noninteractive
+
 chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get install -y \
     -o Dpkg::Options::="--force-confnew" \
-    "${INSTALL_PKGS[@]}" || {
-    echo "WARN: bulk install failed; retrying without optional packages"
-    FILTERED=()
-    for pkg in "${INSTALL_PKGS[@]}"; do
-        is_opt=0
-        for opt in "${OPTIONAL_PKGS[@]}"; do
-            [ "$pkg" = "$opt" ] && is_opt=1 && break
-        done
-        [ "$is_opt" -eq 0 ] && FILTERED+=("$pkg")
-    done
-    chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        -o Dpkg::Options::="--force-confnew" \
-        "${FILTERED[@]}"
-    for opt in "${OPTIONAL_PKGS[@]}"; do
-        chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get install -y "$opt" 2>/dev/null || true
-    done
-}
+    "${REQUIRED_PKGS[@]}"
+
+echo "=== Installing optional packages (best-effort) ==="
+for opt in "${OPTIONAL_PKGS[@]}"; do
+    if pkg_available "$opt"; then
+        chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get install -y "$opt" || true
+    else
+        echo "  skip optional (not available): $opt"
+    fi
+done
 
 # Ensure EFI bootloader bits are present
 chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get install -y \
