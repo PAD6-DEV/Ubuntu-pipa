@@ -46,6 +46,7 @@ sgdisk -n 2:0:+1G -t 2:8300 -c 2:boot "$OUT_IMG"
 sgdisk -n 3:0:0 -t 3:8300 -c 3:root "$OUT_IMG"
 
 LOOP=$(losetup --find --show --partscan "$OUT_IMG")
+partprobe "$LOOP" 2>/dev/null || true
 # Wait for partition nodes
 for _ in $(seq 1 20); do
     [ -b "${LOOP}p1" ] && [ -b "${LOOP}p3" ] && break
@@ -62,9 +63,12 @@ MKE2FS_DEVICE_PHYS_SECTSIZE=4096 MKE2FS_DEVICE_SECTSIZE=4096 \
 MKE2FS_DEVICE_PHYS_SECTSIZE=4096 MKE2FS_DEVICE_SECTSIZE=4096 \
     mkfs.ext4 -F -L ub-pipa "$ROOT_PART"
 
+# Mount root, then boot, then create EFI dir on the boot fs (not under root
+# where it would be hidden by the /boot mount), then mount ESP.
 mount "$ROOT_PART" "$ROOT"
-mkdir -p "$ROOT/boot" "$ROOT/boot/efi"
+mkdir -p "$ROOT/boot"
 mount "$BOOT_PART" "$ROOT/boot"
+mkdir -p "$ROOT/boot/efi"
 mount "$ESP_PART" "$ROOT/boot/efi"
 
 echo "=== mmdebstrap $SUITE ($VARIANT) ==="
