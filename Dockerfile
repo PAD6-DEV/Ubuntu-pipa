@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync wget curl ca-certificates \
     android-tools-adb android-tools-fastboot \
     grub-efi-arm64-bin shim-signed \
+    grub-efi-arm64-bin \
     zip xz-utils pigz \
     python3 \
     && rm -rf /var/lib/apt/lists/*

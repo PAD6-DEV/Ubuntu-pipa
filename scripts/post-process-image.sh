@@ -163,48 +163,88 @@ truncate -s 128M "$OUTPUT_DIR/ubuntu_esp.raw"
 mkfs.fat -F 16 -n "$ESP_LABEL" "$OUTPUT_DIR/ubuntu_esp.raw"
 mount -o loop "$OUTPUT_DIR/ubuntu_esp.raw" "$ESP_MNT"
 
+# Prefer EFI tree already installed onto the disk ESP during rootfs build
 SRC_ESP_MNT=$(mktemp -d)
 if mount "$ESP_PART" "$SRC_ESP_MNT" 2>/dev/null; then
     if [ -d "$SRC_ESP_MNT/EFI" ]; then
-        cp -r "$SRC_ESP_MNT/EFI" "$ESP_MNT/"
+        cp -a "$SRC_ESP_MNT/EFI" "$ESP_MNT/"
     fi
     umount "$SRC_ESP_MNT"
 fi
 rmdir "$SRC_ESP_MNT" 2>/dev/null || true
 
-if [ ! -d "$ESP_MNT/EFI/ubuntu" ] && [ ! -d "$ESP_MNT/EFI/BOOT" ]; then
-    for efi_src in \
-        "$MNT/boot/efi/EFI/ubuntu" \
-        "$MNT/boot/efi/EFI/BOOT" \
-        "$MNT/usr/lib/shim" \
-        "$MNT/usr/lib/grub/arm64-efi"; do
-        [ -d "$efi_src" ] || continue
-        mkdir -p "$ESP_MNT/EFI/ubuntu" "$ESP_MNT/EFI/BOOT"
-        for efi_file in shimaa64.efi grubaa64.efi mmmaa64.efi BOOTAA64.EFI; do
-            [ -f "$efi_src/$efi_file" ] && cp "$efi_src/$efi_file" "$ESP_MNT/EFI/ubuntu/"
-        done
-        # Debian/Ubuntu shim package paths
-        for efi_file in "$efi_src"/*.efi "$efi_src"/*.EFI; do
-            [ -f "$efi_file" ] || continue
-            cp "$efi_file" "$ESP_MNT/EFI/ubuntu/"
-        done
-        [ -f "$ESP_MNT/EFI/ubuntu/shimaa64.efi" ] || [ -f "$ESP_MNT/EFI/ubuntu/grubaa64.efi" ] && break
-    done
+# Also copy from rootfs /boot/efi if present under the mounted image
+if [ -d "$MNT/boot/efi/EFI" ]; then
+    mkdir -p "$ESP_MNT/EFI"
+    cp -a "$MNT/boot/efi/EFI/." "$ESP_MNT/EFI/" 2>/dev/null || true
 fi
 
 mkdir -p "$ESP_MNT/EFI/ubuntu" "$ESP_MNT/EFI/BOOT"
+
+# Copy shim / fallback EFI payloads from package paths in the rootfs
+copy_shim_payloads() {
+    local dest="$1"
+    local src
+    for src in \
+        "$MNT/usr/lib/shim/shimaa64.efi.signed.latest" \
+        "$MNT/usr/lib/shim/shimaa64.efi.signed" \
+        "$MNT/usr/lib/shim/shimaa64.efi"; do
+        if [ -f "$src" ]; then
+            cp -f "$src" "$dest/shimaa64.efi"
+            break
+        fi
+    done
+    # Any leftover *.efi from shim package
+    if [ ! -f "$dest/shimaa64.efi" ]; then
+        src="$(ls "$MNT"/usr/lib/shim/shimaa64.efi* 2>/dev/null | head -n1 || true)"
+        [ -n "$src" ] && [ -f "$src" ] && cp -f "$src" "$dest/shimaa64.efi"
+    fi
+    for src in "$MNT"/usr/lib/shim/mmaa64.efi* "$MNT"/usr/lib/shim/fbaa64.efi*; do
+        [ -f "$src" ] || continue
+        base="$(basename "$src" | sed -E 's/\.signed(\.latest)?$//')"
+        cp -f "$src" "$dest/$base"
+    done
+}
+
+copy_shim_payloads "$ESP_MNT/EFI/ubuntu"
+
+# Build grubaa64.efi if missing (this is what shim loads)
+GRUB_MOD_DIR="$MNT/usr/lib/grub/arm64-efi"
+if [ ! -f "$ESP_MNT/EFI/ubuntu/grubaa64.efi" ]; then
+    if command -v grub-mkimage >/dev/null 2>&1 && [ -d "$GRUB_MOD_DIR" ]; then
+        echo "=== Building grubaa64.efi with grub-mkimage ==="
+        grub-mkimage \
+            -d "$GRUB_MOD_DIR" \
+            -O arm64-efi \
+            -o "$ESP_MNT/EFI/ubuntu/grubaa64.efi" \
+            -p /EFI/ubuntu \
+            all_video boot cat chain configfile echo ext2 fat gzio help \
+            linux loadenv ls lsefi lsefimmap normal part_gpt part_msdos \
+            reboot regexp search search_fs_file search_fs_uuid search_label \
+            sleep test true
+    elif [ -f "$MNT/usr/lib/grub/arm64-efi/monolithic/grubaa64.efi" ]; then
+        cp -f "$MNT/usr/lib/grub/arm64-efi/monolithic/grubaa64.efi" \
+            "$ESP_MNT/EFI/ubuntu/grubaa64.efi"
+    else
+        echo "ERROR: cannot produce grubaa64.efi (shim alone is not enough)" >&2
+        find "$MNT/usr/lib/shim" "$MNT/usr/lib/grub" -type f 2>/dev/null | head -50 >&2 || true
+        exit 1
+    fi
+fi
+
+# Removable path: BOOTAA64.EFI (shim preferred) + grubaa64.efi beside it
 if [ -f "$ESP_MNT/EFI/ubuntu/shimaa64.efi" ]; then
-    cp "$ESP_MNT/EFI/ubuntu/shimaa64.efi" "$ESP_MNT/EFI/BOOT/BOOTAA64.EFI"
-elif [ -f "$ESP_MNT/EFI/BOOT/BOOTAA64.EFI" ]; then
-    :
+    cp -f "$ESP_MNT/EFI/ubuntu/shimaa64.efi" "$ESP_MNT/EFI/BOOT/BOOTAA64.EFI"
 elif [ -f "$ESP_MNT/EFI/ubuntu/grubaa64.efi" ]; then
-    cp "$ESP_MNT/EFI/ubuntu/grubaa64.efi" "$ESP_MNT/EFI/BOOT/BOOTAA64.EFI"
+    cp -f "$ESP_MNT/EFI/ubuntu/grubaa64.efi" "$ESP_MNT/EFI/BOOT/BOOTAA64.EFI"
 else
-    echo "ERROR: No shimaa64.efi or grubaa64.efi found in image" >&2
+    echo "ERROR: No shimaa64.efi or grubaa64.efi found for ESP" >&2
     find "$ESP_MNT" -type f >&2 || true
     exit 1
 fi
+cp -f "$ESP_MNT/EFI/ubuntu/grubaa64.efi" "$ESP_MNT/EFI/BOOT/grubaa64.efi"
 
+# Stub grub.cfg on ESP: redirect to labeled /boot partition
 for shim_vendor in ubuntu BOOT; do
     mkdir -p "$ESP_MNT/EFI/$shim_vendor"
     cat > "$ESP_MNT/EFI/$shim_vendor/grub.cfg" <<ESPCFG
@@ -229,6 +269,13 @@ ESPCFG
 set BOOT_UUID=""
 UUIDCFG
 done
+
+echo "=== ESP contents ==="
+find "$ESP_MNT" -type f -printf '%p (%s)\n' | sort
+if [ ! -f "$ESP_MNT/EFI/ubuntu/grubaa64.efi" ] || [ ! -f "$ESP_MNT/EFI/BOOT/BOOTAA64.EFI" ]; then
+    echo "ERROR: ESP missing required EFI binaries after assembly" >&2
+    exit 1
+fi
 
 umount "$ESP_MNT"
 umount "$MNT/boot"

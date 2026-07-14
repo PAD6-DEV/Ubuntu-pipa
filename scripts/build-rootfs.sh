@@ -182,9 +182,9 @@ for opt in "${OPTIONAL_PKGS[@]}"; do
     fi
 done
 
-# Ensure EFI bootloader bits are present
+# Ensure EFI bootloader packages are present (modules + mkimage + signed shim)
 chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    grub-efi-arm64 shim-signed || true
+    grub-efi-arm64 grub-efi-arm64-bin shim-signed || true
 
 echo "=== Running post-install hooks ==="
 if [ "$VARIANT" = plasma ]; then
