@@ -1,6 +1,16 @@
 #!/bin/bash
 set -x
 
+# Offline tablet images: cloud-init can block GDM (After=cloud-config.service).
+mkdir -p /etc/cloud
+touch /etc/cloud/cloud-init.disabled
+systemctl disable --now cloud-init.service cloud-init-local.service \
+    cloud-init-main.service cloud-init-network.service \
+    cloud-config.service cloud-final.service 2>/dev/null || true
+systemctl mask cloud-init.service cloud-init-local.service \
+    cloud-init-main.service cloud-init-network.service \
+    cloud-config.service cloud-final.service 2>/dev/null || true
+
 # Display manager (GNOME)
 systemctl enable gdm3.service || systemctl enable gdm.service || true
 

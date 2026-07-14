@@ -27,4 +27,26 @@ ls /boot/Image* >/dev/null 2>&1 || ls /boot/vmlinuz-* >/dev/null 2>&1 || fail "k
 [ -d /boot/dtbs/qcom ] || fail "DTB directory missing"
 ok "kernel"
 
+# Boot / GUI (OOB boot path)
+grep -qw splash /etc/cmdline 2>/dev/null || fail "cmdline missing splash"
+grep -qw quiet /etc/cmdline 2>/dev/null || fail "cmdline missing quiet"
+command -v plymouth >/dev/null 2>&1 || fail "plymouth missing"
+[ -d /usr/share/plymouth/themes/spinner ] || fail "plymouth spinner theme missing"
+[ -f /etc/cloud/cloud-init.disabled ] || fail "cloud-init not disabled"
+systemctl get-default 2>/dev/null | grep -q graphical.target || fail "default target is not graphical"
+if [ -f /etc/gdm3/custom.conf ] || [ -L /etc/systemd/system/display-manager.service ]; then
+    for pam in /etc/pam.d/gdm-autologin /etc/pam.d/gdm-password; do
+        if [ -f "$pam" ] && grep -q 'pam_succeed_if.so user != root' "$pam"; then
+            fail "$pam still blocks root autologin"
+        fi
+    done
+    ok "gdm root autologin pam"
+fi
+if mountpoint -q /boot/efi 2>/dev/null || [ -d /boot/efi/EFI ]; then
+    [ -f /boot/efi/EFI/ubuntu/grubaa64.efi ] || [ -f /boot/efi/EFI/BOOT/grubaa64.efi ] \
+        || fail "ESP missing grubaa64.efi"
+    ok "esp grubaa64"
+fi
+ok "boot/gui"
+
 echo "Hardware validation passed."

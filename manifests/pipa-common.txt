@@ -26,5 +26,7 @@ pipewire-pulse
 libcamera0.7
 libcamera-tools
 gstreamer1.0-libcamera
+plymouth
+plymouth-theme-spinner
 # Optional (installed if present in apt):
-# qrtr-tools rmtfs tqftpserv pd-mapper tuned plymouth
+# qrtr-tools rmtfs tqftpserv pd-mapper tuned

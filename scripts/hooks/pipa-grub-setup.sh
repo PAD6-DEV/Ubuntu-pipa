@@ -3,12 +3,30 @@ set -eux
 
 ROOTFS_LABEL="${ROOTFS_LABEL:-ub-pipa}"
 BOOT_LABEL="${BOOT_LABEL:-boot}"
-# Avoid "splash" — with no working Plymouth/fb it leaves a black screen after GRUB.
-CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 earlycon quiet clk_ignore_unused pd_ignore_unused"
+CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 earlycon quiet splash clk_ignore_unused pd_ignore_unused"
 
 printf '%s\n' "$CMDLINE" > /etc/cmdline
 mkdir -p /boot
 printf '%s\n' "$CMDLINE" > /boot/cmdline.txt
+
+# Ensure Plymouth is in the initramfs before regenerating it.
+mkdir -p /etc/dracut.conf.d
+cat > /etc/dracut.conf.d/99-plymouth.conf <<'EOF'
+add_dracutmodules+=" plymouth "
+EOF
+mkdir -p /etc/initramfs-tools/conf.d
+echo 'FRAMEBUFFER=y' > /etc/initramfs-tools/conf.d/splash
+if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+    plymouth-set-default-theme spinner || true
+elif [ -d /usr/share/plymouth/themes/spinner ]; then
+    mkdir -p /etc/plymouth
+    cat > /etc/plymouth/plymouthd.conf <<'EOF'
+[Daemon]
+Theme=spinner
+ShowDelay=0
+DeviceTimeout=8
+EOF
+fi
 
 # Build initramfs with dracut if available
 KERNEL_VER="$(ls /usr/lib/modules 2>/dev/null | head -n1 || true)"

@@ -183,14 +183,22 @@ EOF
             /usr/share/xsessions/ubuntu.desktop \
             /usr/share/xsessions/gnome.desktop \
         )" || true
+        SESSION_NAME="$(basename "${SESSION_FILE:-ubuntu}" .desktop)"
 
         install -d /etc/gdm3
-        cat > /etc/gdm3/custom.conf <<'EOF'
+        cat > /etc/gdm3/custom.conf <<EOF
 [daemon]
 AutomaticLoginEnable=True
 AutomaticLogin=root
 WaylandEnable=true
+DefaultSession=$SESSION_NAME.desktop
 EOF
+        # Ubuntu gdm PAM blocks root; firstboot needs root autologin.
+        for pam in /etc/pam.d/gdm-autologin /etc/pam.d/gdm-password; do
+            if [ -f "$pam" ]; then
+                sed -i '/pam_succeed_if.so user != root/d' "$pam"
+            fi
+        done
         ;;
     *)
         echo "Unknown display manager: $FIRSTBOOT_DM" >&2

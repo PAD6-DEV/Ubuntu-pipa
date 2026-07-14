@@ -1,6 +1,16 @@
 #!/bin/bash
 set -x
 
+# Offline tablet images: cloud-init can hang before the display manager.
+mkdir -p /etc/cloud
+touch /etc/cloud/cloud-init.disabled
+systemctl disable --now cloud-init.service cloud-init-local.service \
+    cloud-init-main.service cloud-init-network.service \
+    cloud-config.service cloud-final.service 2>/dev/null || true
+systemctl mask cloud-init.service cloud-init-local.service \
+    cloud-init-main.service cloud-init-network.service \
+    cloud-config.service cloud-final.service 2>/dev/null || true
+
 # Display manager (Plasma / Kubuntu)
 systemctl enable sddm.service || true
 

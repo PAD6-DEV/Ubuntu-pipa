@@ -136,7 +136,6 @@ chroot "$ROOT" apt-get update
 # Optional packages: try if available, never fail the build
 OPTIONAL_PKGS=(
     qrtr-tools rmtfs tqftpserv pd-mapper tuned tuned-ppd
-    plymouth plymouth-theme-spinner
 )
 
 # Required install set from manifests (exclude comments already stripped)
@@ -198,8 +197,8 @@ HOOKS=(
     pipa-grub-setup.sh
     "$SERVICES_HOOK"
     pipa-firstboot-install.sh
-    pipa-validate-hardware.sh
     pipa-default-target.sh
+    pipa-validate-hardware.sh
 )
 
 for hook in "${HOOKS[@]}"; do
