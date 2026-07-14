@@ -49,4 +49,10 @@ if mountpoint -q /boot/efi 2>/dev/null || [ -d /boot/efi/EFI ]; then
 fi
 ok "boot/gui"
 
+# Snap prerequisites (firefox etc. are snaps on Ubuntu)
+[ -f /etc/modules-load.d/pipa-snap.conf ] || fail "pipa-snap modules-load missing"
+grep -q '^squashfs$' /etc/modules-load.d/pipa-snap.conf || fail "squashfs not listed for autoload"
+command -v snap >/dev/null 2>&1 || fail "snap client missing"
+ok "snapd"
+
 echo "Hardware validation passed."

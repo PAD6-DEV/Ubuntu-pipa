@@ -195,6 +195,7 @@ fi
 HOOKS=(
     pipa-apt-repo.sh
     pipa-grub-setup.sh
+    pipa-snapd.sh
     "$SERVICES_HOOK"
     pipa-firstboot-install.sh
     pipa-default-target.sh
