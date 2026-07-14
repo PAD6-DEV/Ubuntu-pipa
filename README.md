@@ -63,9 +63,12 @@ sudo ./scripts/build-all.sh gnome
 
 ## Flashing
 
-Download the variant you want from
-[Releases](https://github.com/PAD6-DEV/Ubuntu-pipa/releases) (each desktop is
-a separate `.tar.xz`), then:
+Download the variant you want from a
+[git tag](https://github.com/PAD6-DEV/Ubuntu-pipa/tags) (each desktop is a
+separate `.tar.xz` attached to the tag). Builds on `main` only upload
+workflow artifacts; push a `v*` or `nightly-*` tag to publish flashables.
+
+Then:
 
 ```bash
 tar -xJf ubuntu-pipa-gnome-YYYYMMDD.tar.xz

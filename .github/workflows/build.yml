@@ -6,6 +6,7 @@ on:
     branches: [main]
     tags:
       - "v*"
+      - "nightly-*"
 
 permissions:
   contents: write
@@ -45,11 +46,13 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  release:
-    name: Create GitHub Release
+  # Attach flashable archives to the git tag. GitHub stores tag assets as a
+  # Release object for that tag only — we do not create Releases on main pushes.
+  publish-tag:
+    name: Attach images to tag
     needs: [image]
     runs-on: ubuntu-24.04-arm
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
 
@@ -57,36 +60,31 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ubuntu-pipa-gnome
-          path: release-assets/
+          path: tag-assets/
 
       - name: Download Plasma archive
         uses: actions/download-artifact@v4
         with:
           name: ubuntu-pipa-plasma
-          path: release-assets/
+          path: tag-assets/
 
-      - name: Prepare release metadata
+      - name: Prepare tag metadata
         id: meta
         run: |
           set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
           DATE=$(date -u +%Y%m%d)
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF_NAME}"
-          else
-            TAG="nightly-${DATE}"
-          fi
           {
             echo "tag=${TAG}"
             echo "date=${DATE}"
           } >> "$GITHUB_OUTPUT"
 
-          ls -lah release-assets/
-          # Flatten any nested dirs from artifact download
-          find release-assets -type f \( -name '*.tar.xz' -o -name '*.sha256' \) -print
+          find tag-assets -type f \( -name '*.tar.xz' -o -name '*.sha256' \) -printf '%p\n' | sort
 
-          cat > release-notes.md <<EOF
+          cat > tag-notes.md <<EOF
           ## Ubuntu 26.04 for Xiaomi Pad 6 (pipa)
 
+          Tag: \`${TAG}\`
           Build date: ${DATE}
           Commit: \`${GITHUB_SHA}\`
 
@@ -106,46 +104,36 @@ jobs:
 
           \`\`\`bash
           tar -xJf ubuntu-pipa-gnome-YYYYMMDD.tar.xz
-          cd ubuntu-pipa-gnome-YYYYMMDD   # or extract with --strip if flat
+          cd ubuntu-pipa-gnome-YYYYMMDD
           ./flash.sh
           \`\`\`
-
-          Archives are compressed with xz (\`.tar.xz\`).
           EOF
-          # Fix leading indentation in heredoc body for nicer notes
-          sed -i 's/^          //' release-notes.md
+          sed -i 's/^          //' tag-notes.md
 
-      - name: Create or update release
+      - name: Upload assets to tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="${{ steps.meta.outputs.tag }}"
           TITLE="Ubuntu Pipa ${TAG}"
-          shopt -s nullglob
-          ASSETS=(release-assets/*.tar.xz release-assets/*.sha256)
+          mapfile -t ASSETS < <(find tag-assets -type f \( -name '*.tar.xz' -o -name '*.sha256' \) | sort)
           if [ "${#ASSETS[@]}" -eq 0 ]; then
-            # Artifacts may land in nested folders
-            mapfile -t ASSETS < <(find release-assets -type f \( -name '*.tar.xz' -o -name '*.sha256' \) | sort)
-          fi
-          if [ "${#ASSETS[@]}" -eq 0 ]; then
-            echo "No release assets found"
+            echo "No tag assets found"
             exit 1
           fi
 
+          # GitHub can only host binaries on a tag via a Release attached to
+          # that tag. Keep it tied to the tag (no auto-"Latest" from main).
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Updating existing release $TAG"
+            echo "Updating assets on existing tag $TAG"
             gh release upload "$TAG" "${ASSETS[@]}" --clobber
-            gh release edit "$TAG" --title "$TITLE" --notes-file release-notes.md
+            gh release edit "$TAG" --title "$TITLE" --notes-file tag-notes.md --latest=false
           else
-            echo "Creating release $TAG"
-            # Nightly tags on main: recreate floating nightly tag
-            if [[ "$TAG" == nightly-* ]]; then
-              git tag -f "$TAG" "$GITHUB_SHA"
-              git push -f origin "refs/tags/$TAG"
-            fi
+            echo "Creating tag asset bundle for $TAG"
             gh release create "$TAG" "${ASSETS[@]}" \
+              --verify-tag \
               --title "$TITLE" \
-              --notes-file release-notes.md \
-              --latest
+              --notes-file tag-notes.md \
+              --latest=false
           fi
