@@ -65,8 +65,9 @@ sudo ./scripts/build-all.sh gnome
 
 Download the variant you want from a
 [git tag](https://github.com/PAD6-DEV/Ubuntu-pipa/tags) (each desktop is a
-separate `.tar.xz` attached to the tag). Builds on `main` only upload
-workflow artifacts; push a `v*` or `nightly-*` tag to publish flashables.
+separate `.tar.xz` attached to the tag). Successful `main` / manual builds
+create a `build-YYYYMMDD-<sha>` tag and attach the archives there; push a
+`v*` / `nightly-*` tag yourself for a named release.
 
 Then:
 

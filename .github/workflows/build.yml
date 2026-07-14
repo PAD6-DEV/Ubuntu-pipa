@@ -7,6 +7,7 @@ on:
     tags:
       - "v*"
       - "nightly-*"
+      - "build-*"
 
 permissions:
   contents: write
@@ -46,15 +47,18 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  # Attach flashable archives to the git tag. GitHub stores tag assets as a
-  # Release object for that tag only — we do not create Releases on main pushes.
+  # Attach flashable archives to a git tag. GitHub hosts tag binaries via a
+  # Release object for that tag.
   publish-tag:
     name: Attach images to tag
     needs: [image]
     runs-on: ubuntu-24.04-arm
-    if: startsWith(github.ref, 'refs/tags/')
+    # Run for tag pushes, main pushes, and manual dispatch.
+    if: always() && needs.image.result == 'success' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download GNOME archive
         uses: actions/download-artifact@v4
@@ -68,12 +72,26 @@ jobs:
           name: ubuntu-pipa-plasma
           path: tag-assets/
 
-      - name: Prepare tag metadata
+      - name: Resolve tag name
         id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
           DATE=$(date -u +%Y%m%d)
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            # Main / manual builds get a dated build tag on this commit.
+            TAG="build-${DATE}-${SHORT_SHA}"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -f "$TAG" "$GITHUB_SHA"
+            git push -f origin "refs/tags/$TAG"
+          fi
+
           {
             echo "tag=${TAG}"
             echo "date=${DATE}"
@@ -123,8 +141,6 @@ jobs:
             exit 1
           fi
 
-          # GitHub can only host binaries on a tag via a Release attached to
-          # that tag. Keep it tied to the tag (no auto-"Latest" from main).
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Updating assets on existing tag $TAG"
             gh release upload "$TAG" "${ASSETS[@]}" --clobber
