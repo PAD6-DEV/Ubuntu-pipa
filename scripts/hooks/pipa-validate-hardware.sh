@@ -28,8 +28,9 @@ ls /boot/Image* >/dev/null 2>&1 || ls /boot/vmlinuz-* >/dev/null 2>&1 || fail "k
 ok "kernel"
 
 # Boot / GUI (OOB boot path)
-grep -qw splash /etc/cmdline 2>/dev/null || fail "cmdline missing splash"
+# Do not require kernel "splash" — pipa panel black-screens without early DRM plymouth.
 grep -qw quiet /etc/cmdline 2>/dev/null || fail "cmdline missing quiet"
+! grep -qw splash /etc/cmdline 2>/dev/null || fail "cmdline must not include splash on pipa"
 command -v plymouth >/dev/null 2>&1 || fail "plymouth missing"
 [ -d /usr/share/plymouth/themes/spinner ] || fail "plymouth spinner theme missing"
 [ -f /etc/cloud/cloud-init.disabled ] || fail "cloud-init not disabled"
