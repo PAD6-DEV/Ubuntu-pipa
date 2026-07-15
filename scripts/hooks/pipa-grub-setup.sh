@@ -3,7 +3,7 @@ set -eux
 
 ROOTFS_LABEL="${ROOTFS_LABEL:-ub-pipa}"
 BOOT_LABEL="${BOOT_LABEL:-boot}"
-CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 quiet clk_ignore_unused pd_ignore_unused"
+CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 earlycon quiet splash clk_ignore_unused pd_ignore_unused"
 
 printf '%s\n' "$CMDLINE" > /etc/cmdline
 mkdir -p /boot
