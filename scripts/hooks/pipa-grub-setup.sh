@@ -9,8 +9,12 @@ printf '%s\n' "$CMDLINE" > /etc/cmdline
 mkdir -p /boot
 printf '%s\n' "$CMDLINE" > /boot/cmdline.txt
 
-# Ensure Plymouth is in the initramfs before regenerating it.
+# Dracut must not bake the loopback build disk UUID into the initramfs.
 mkdir -p /etc/dracut.conf.d
+cat > /etc/dracut.conf.d/10-pipa-image.conf <<'EOF'
+# Portable images: root is always discovered via kernel cmdline LABEL=ub-pipa.
+hostonly="no"
+EOF
 cat > /etc/dracut.conf.d/99-plymouth.conf <<'EOF'
 add_dracutmodules+=" plymouth "
 EOF
@@ -34,10 +38,21 @@ if [ -n "$KERNEL_VER" ]; then
     if command -v pipa-refresh-initramfs >/dev/null 2>&1; then
         pipa-refresh-initramfs || true
     elif command -v dracut >/dev/null 2>&1; then
-        dracut --force --kver "$KERNEL_VER" "/boot/initramfs-${KERNEL_VER}.img" || true
+        dracut --force --no-hostonly --kver "$KERNEL_VER" "/boot/initramfs-${KERNEL_VER}.img" || true
         cp -f "/boot/initramfs-${KERNEL_VER}.img" /boot/initramfs-linux-pipa.img || true
     elif command -v update-initramfs >/dev/null 2>&1; then
         update-initramfs -c -k "$KERNEL_VER" || update-initramfs -u || true
+    fi
+    # Fail the image build if dracut still embedded a build-host root UUID.
+    if [ -f "/usr/lib/modules/$KERNEL_VER/initramfs-${KERNEL_VER}.img" ]; then
+        if zstdcat "/usr/lib/modules/$KERNEL_VER/initramfs-${KERNEL_VER}.img" 2>/dev/null \
+            | cpio -idm etc/cmdline.d/20-root-dev.conf 2>/dev/null \
+            && grep -q 'root=UUID=' etc/cmdline.d/20-root-dev.conf 2>/dev/null; then
+            echo "pipa-grub-setup: initramfs has hostonly root UUID; dracut misconfigured" >&2
+            cat etc/cmdline.d/20-root-dev.conf >&2 || true
+            exit 1
+        fi
+        rm -rf etc 2>/dev/null || true
     fi
 fi
 

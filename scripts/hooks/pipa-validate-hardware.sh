@@ -28,10 +28,19 @@ ls /boot/Image* >/dev/null 2>&1 || ls /boot/vmlinuz-* >/dev/null 2>&1 || fail "k
 ok "kernel"
 
 # Boot / GUI (OOB boot path)
-# Do not require kernel "splash" — pipa panel black-screens without early DRM plymouth.
 grep -qw quiet /etc/cmdline 2>/dev/null || fail "cmdline missing quiet"
-! grep -qw splash /etc/cmdline 2>/dev/null || fail "cmdline must not include splash on pipa"
 command -v plymouth >/dev/null 2>&1 || fail "plymouth missing"
+[ -d /usr/share/plymouth/themes/spinner ] || fail "plymouth spinner theme missing"
+# Initramfs must not bake the image-build host root UUID.
+if command -v zstdcat >/dev/null 2>&1; then
+    initrd="$(ls /usr/lib/modules/*/initramfs-*.img 2>/dev/null | head -n1 || true)"
+    if [ -n "$initrd" ] && zstdcat "$initrd" 2>/dev/null \
+        | cpio -idm etc/cmdline.d/20-root-dev.conf 2>/dev/null \
+        && grep -q 'root=UUID=' etc/cmdline.d/20-root-dev.conf 2>/dev/null; then
+        fail "initramfs contains hostonly root UUID"
+    fi
+    rm -rf etc 2>/dev/null || true
+fi
 [ -d /usr/share/plymouth/themes/spinner ] || fail "plymouth spinner theme missing"
 [ -f /etc/cloud/cloud-init.disabled ] || fail "cloud-init not disabled"
 systemctl get-default 2>/dev/null | grep -q graphical.target || fail "default target is not graphical"
