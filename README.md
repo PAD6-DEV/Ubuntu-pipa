@@ -104,5 +104,7 @@ in a fastboot loop.
 
 ## First boot
 
-Root autologins once (`root` / `root`). A zenity/kdialog wizard creates your
-user (sudo group), sets hostname, and reboots to the normal login screen.
+Root should autologin once into Plasma/GNOME (`root` / `root`). If you land on
+the login screen instead, type user `root` and password `root`. A zenity/kdialog
+wizard then creates your user (sudo group), sets hostname, and reboots to the
+normal login screen.

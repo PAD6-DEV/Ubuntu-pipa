@@ -75,6 +75,11 @@ if [ -f /etc/sddm.conf.d/10-firstboot-autologin.conf ]; then
         || fail "Plasma KWin InputMethod not set for virtual keyboard"
     dpkg -l plasma-keyboard 2>/dev/null | grep -q '^ii' \
         || fail "plasma-keyboard package not installed"
+    # Root must have a real password hash (not locked !/*) for SDDM fallback login.
+    root_hash="$(awk -F: '$1=="root"{print $2}' /etc/shadow)"
+    case "$root_hash" in
+        ''|'!'|'*'|\!*) fail "root password is locked or unset in /etc/shadow" ;;
+    esac
     ok "sddm root autologin + plasma keyboard"
 fi
 if mountpoint -q /boot/efi 2>/dev/null || [ -d /boot/efi/EFI ]; then

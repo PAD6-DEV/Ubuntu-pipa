@@ -141,7 +141,8 @@ else
     useradd -m -G sudo -s "$DEFAULT_SHELL" "$username"
 fi
 
-printf 'root:%s\n%s:%s\n' "$password" "$username" "$password" | chpasswd
+# Also set via crypt method so short passwords cannot be rejected mid-wizard.
+printf 'root:%s\n%s:%s\n' "$password" "$username" "$password" | chpasswd -c YESCRYPT
 printf '%s\n' "$hostname" > /etc/hostname
 cat > /etc/hosts <<HOSTS
 127.0.0.1 localhost
@@ -176,6 +177,8 @@ case "$FIRSTBOOT_DM" in
         cat > /etc/sddm.conf.d/00-root-login.conf <<'EOF'
 [Users]
 MinimumUid=0
+HideUsers=
+HideShells=
 EOF
         cat > /etc/sddm.conf.d/10-firstboot-autologin.conf <<EOF
 [Autologin]
@@ -186,10 +189,11 @@ Relogin=false
 [General]
 DisplayServer=wayland
 EOF
-        # Ubuntu SDDM PAM blocks root; firstboot needs root autologin.
+        # Ubuntu SDDM PAM blocks root; firstboot needs root login/autologin.
         for pam in /etc/pam.d/sddm /etc/pam.d/sddm-autologin; do
             if [ -f "$pam" ]; then
                 sed -i '/pam_succeed_if.so.*user != root/d' "$pam"
+                sed -i '/pam_succeed_if.so.*uid >= 1000/d' "$pam"
             fi
         done
         ;;
@@ -237,7 +241,11 @@ EOF
 install -d /var/lib/pipa-firstboot
 : > /var/lib/pipa-firstboot/needs-setup
 
-echo 'root:root' | chpasswd
+# Set root password without PAM pwquality (Ubuntu enforce_for_root rejects "root").
+# First-boot credentials: root / root
+ROOT_HASH="$(openssl passwd -6 root)"
+usermod -p "$ROOT_HASH" root
+passwd -u root 2>/dev/null || true
 
 # Ensure sudo group has privileges (default on Ubuntu)
 install -d /etc/sudoers.d
