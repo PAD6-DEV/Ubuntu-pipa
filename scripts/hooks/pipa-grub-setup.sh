@@ -44,15 +44,18 @@ if [ -n "$KERNEL_VER" ]; then
         update-initramfs -c -k "$KERNEL_VER" || update-initramfs -u || true
     fi
     # Fail the image build if dracut still embedded a build-host root UUID.
+    # Extract into a temp dir — never cwd — so we cannot clobber or rm -rf /etc.
     if [ -f "/usr/lib/modules/$KERNEL_VER/initramfs-${KERNEL_VER}.img" ]; then
+        check_dir="$(mktemp -d)"
         if zstdcat "/usr/lib/modules/$KERNEL_VER/initramfs-${KERNEL_VER}.img" 2>/dev/null \
-            | cpio -idm etc/cmdline.d/20-root-dev.conf 2>/dev/null \
-            && grep -q 'root=UUID=' etc/cmdline.d/20-root-dev.conf 2>/dev/null; then
+            | (cd "$check_dir" && cpio -idm etc/cmdline.d/20-root-dev.conf 2>/dev/null) \
+            && grep -q 'root=UUID=' "$check_dir/etc/cmdline.d/20-root-dev.conf" 2>/dev/null; then
             echo "pipa-grub-setup: initramfs has hostonly root UUID; dracut misconfigured" >&2
-            cat etc/cmdline.d/20-root-dev.conf >&2 || true
+            cat "$check_dir/etc/cmdline.d/20-root-dev.conf" >&2 || true
+            rm -rf "$check_dir"
             exit 1
         fi
-        rm -rf etc 2>/dev/null || true
+        rm -rf "$check_dir"
     fi
 fi
 
