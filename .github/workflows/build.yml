@@ -48,11 +48,11 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  # Mark successful builds with a git tag only. Image archives exceed GitHub
-  # Release asset size limits, so downloads come from the workflow artifacts
-  # on this run (ubuntu-pipa-gnome / ubuntu-pipa-plasma), not a Release.
+  # Tag the build and attach images via a GitHub Release. Archives often
+  # exceed the 2GiB per-asset limit, so oversized files are split into
+  # <=1900MiB parts (reassemble with cat — see release notes).
   publish-tag:
-    name: Tag successful build
+    name: Publish tag release
     needs: [image]
     runs-on: ubuntu-24.04
     if: always() && needs.image.result == 'success' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
@@ -61,7 +61,72 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create or confirm build tag
+      - name: Download GNOME archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu-pipa-gnome
+          path: release-assets/
+
+      - name: Download Plasma archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu-pipa-plasma
+          path: release-assets/
+
+      - name: Split oversized archives and stage release assets
+        id: stage
+        run: |
+          set -euo pipefail
+          mkdir -p staged
+          # download-artifact may keep an output/ prefix; flatten to staged/
+          find release-assets -type f \( -name '*.tar.xz' -o -name '*.sha256' \) \
+            -exec cp -a {} staged/ \;
+          cd staged
+
+          # Keep under GitHub's 2GiB release asset limit (2147483648 bytes).
+          MAX_BYTES=$((1900 * 1024 * 1024))
+
+          shopt -s nullglob
+          for archive in *.tar.xz; do
+            size=$(stat -c%s "$archive")
+            echo "$archive: $size bytes"
+            if [ "$size" -gt "$MAX_BYTES" ]; then
+              echo "Splitting $archive into <=1900MiB parts"
+              split -b "$MAX_BYTES" -d -a 2 --additional-suffix=.part \
+                "$archive" "${archive}."
+              rm -f "$archive"
+            fi
+          done
+
+          cat > join-archives.sh <<'JOIN'
+          #!/usr/bin/env bash
+          # Reassemble split release assets, e.g.:
+          #   ./join-archives.sh ubuntu-pipa-gnome-YYYYMMDD.tar.xz
+          set -euo pipefail
+          if [ "$#" -ne 1 ]; then
+            echo "Usage: $0 <archive.tar.xz>" >&2
+            exit 1
+          fi
+          out="$1"
+          parts=( "${out}".*.part )
+          if [ ! -e "${parts[0]}" ]; then
+            echo "No parts matching ${out}.*.part" >&2
+            exit 1
+          fi
+          echo "Joining ${#parts[@]} parts -> $out"
+          cat "${parts[@]}" > "$out"
+          if [ -f "${out}.sha256" ]; then
+            sha256sum -c "${out}.sha256"
+          fi
+          JOIN
+          # Strip common indent from the heredoc body.
+          sed -i 's/^          //' join-archives.sh
+          chmod +x join-archives.sh
+
+          echo "Staged assets:"
+          find . -type f -printf '%p (%s bytes)\n' | sort
+
+      - name: Create tag and GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -72,34 +137,66 @@ jobs:
 
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF_NAME}"
-            echo "Build already tagged as ${TAG}"
           else
             TAG="build-${DATE}-${SHORT_SHA}"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            NOTES="$(cat <<EOF
-          Ubuntu 26.04 for Xiaomi Pad 6 (pipa)
-
-          Tag: ${TAG}
-          Build date: ${DATE}
-          Commit: ${GITHUB_SHA}
-
-          Archives are workflow artifacts (not a GitHub Release — files exceed
-          the release asset size limit). Download from:
-          ${RUN_URL}
-
-          Artifacts: ubuntu-pipa-gnome, ubuntu-pipa-plasma
-          EOF
-          )"
-            # Strip common indent from the heredoc body.
-            NOTES="$(printf '%s\n' "$NOTES" | sed 's/^          //')"
-            git tag -f -a "$TAG" "$GITHUB_SHA" -m "$NOTES"
+            git tag -f -a "$TAG" "$GITHUB_SHA" -m "Ubuntu pipa build ${TAG}"
             git push -f origin "refs/tags/$TAG"
-            echo "Created annotated tag ${TAG}"
           fi
 
-          # Drop any Release that would re-introduce oversized assets for this tag.
+          TITLE="Ubuntu Pipa ${TAG}"
+          cat > release-notes.md <<EOF
+          ## Ubuntu 26.04 for Xiaomi Pad 6 (pipa)
+
+          Tag: \`${TAG}\`
+          Build date: ${DATE}
+          Commit: \`${GITHUB_SHA}\`
+          Workflow: ${RUN_URL}
+
+          ### Downloads
+
+          | Variant | Archive |
+          |---------|---------|
+          | GNOME   | \`ubuntu-pipa-gnome-*.tar.xz\` (or \`.part\` pieces) |
+          | Plasma  | \`ubuntu-pipa-plasma-*.tar.xz\` (or \`.part\` pieces) |
+
+          Files larger than ~1.9 GiB are split to fit GitHub's 2 GiB release
+          asset limit. Reassemble before extracting:
+
+          \`\`\`bash
+          # either:
+          ./join-archives.sh ubuntu-pipa-gnome-YYYYMMDD.tar.xz
+          # or:
+          cat ubuntu-pipa-gnome-YYYYMMDD.tar.xz.*.part > ubuntu-pipa-gnome-YYYYMMDD.tar.xz
+          sha256sum -c ubuntu-pipa-gnome-YYYYMMDD.tar.xz.sha256
+          \`\`\`
+
+          Then:
+
+          \`\`\`bash
+          tar -xJf ubuntu-pipa-gnome-YYYYMMDD.tar.xz
+          cd ubuntu-pipa-gnome-YYYYMMDD
+          ./flash.sh
+          \`\`\`
+          EOF
+          sed -i 's/^          //' release-notes.md
+
+          mapfile -t ASSETS < <(find staged -type f | sort)
+          if [ "${#ASSETS[@]}" -eq 0 ]; then
+            echo "No release assets found" >&2
+            exit 1
+          fi
+
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Deleting GitHub Release for ${TAG} (keep tag; use Actions artifacts)"
-            gh release delete "$TAG" --yes
+            echo "Updating release $TAG"
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes-file release-notes.md --latest=false
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --verify-tag \
+              --title "$TITLE" \
+              --notes-file release-notes.md \
+              --latest=false
           fi

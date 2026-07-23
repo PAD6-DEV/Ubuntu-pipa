@@ -64,32 +64,40 @@ sudo ./scripts/build-all.sh gnome
 ## Flashing
 
 Download the variant you want from the matching
-[Actions run](https://github.com/PAD6-DEV/Ubuntu-pipa/actions) artifacts
-(`ubuntu-pipa-gnome` / `ubuntu-pipa-plasma`). Successful `main` / manual
-builds also create a `build-YYYYMMDD-<sha>`
-[git tag](https://github.com/PAD6-DEV/Ubuntu-pipa/tags) pointing at the
-commit (no GitHub Release — the archives exceed the release asset size
-limit). Push a `v*` / `nightly-*` tag yourself for a named build marker.
+[GitHub Release](https://github.com/PAD6-DEV/Ubuntu-pipa/releases)
+(successful `main` / manual builds publish a `build-YYYYMMDD-<sha>` tag +
+release). Archives larger than ~1.9 GiB are split into `.part` pieces to stay
+under GitHub’s 2 GiB asset limit — reassemble with `./join-archives.sh` (or
+`cat …part*`) before extracting. Push a `v*` / `nightly-*` tag yourself for a
+named release.
 
 Then:
 
 ```bash
+# If the release has .part files:
+./join-archives.sh ubuntu-pipa-gnome-YYYYMMDD.tar.xz
+
 tar -xJf ubuntu-pipa-gnome-YYYYMMDD.tar.xz
 cd ubuntu-pipa-gnome-YYYYMMDD
 
 # Put the device into fastboot mode, then:
 ./flash.sh
 
-# Multiboot (rootfs to a dedicated partition, default: linux)
-./flash-multiboot.sh linux boot_ab
+# Multiboot (interactive: choose boot slot + rootfs partition name)
+./flash-multiboot.sh
 ```
+
+Both scripts can also be driven non-interactively with env vars
+(`ERASE_DTBO`, `FLASH_VBMETA`; multiboot also accepts `BOOT_SLOT_TARGET`,
+`ROOTFS_PARTITION`).
 
 | Artifact | Fastboot target |
 |----------|-----------------|
-| `silicium.img` | `boot_ab` |
+| `silicium.img` | `boot_ab` (or `boot_a` / `boot_b`) |
 | `ubuntu_esp.raw` | `rawdump` |
 | `ubuntu_boot.raw` | `cust` |
-| `ubuntu_rootfs.raw` | `userdata` (or custom) |
+| `ubuntu_rootfs.raw` | `userdata` (single-boot) or e.g. `linux` (multiboot) |
+| `vbmeta-disabled.img` | `vbmeta_ab` (optional) |
 
 ## First boot
 
