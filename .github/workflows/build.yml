@@ -7,7 +7,8 @@ on:
     tags:
       - "v*"
       - "nightly-*"
-      - "build-*"
+      # build-* tags are created by publish-tag after a successful main/dispatch
+      # build; do not list them here or the tag push would rebuild again.
 
 permissions:
   contents: write
@@ -47,109 +48,58 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  # Attach flashable archives to a git tag. GitHub hosts tag binaries via a
-  # Release object for that tag.
+  # Mark successful builds with a git tag only. Image archives exceed GitHub
+  # Release asset size limits, so downloads come from the workflow artifacts
+  # on this run (ubuntu-pipa-gnome / ubuntu-pipa-plasma), not a Release.
   publish-tag:
-    name: Attach images to tag
+    name: Tag successful build
     needs: [image]
-    runs-on: ubuntu-24.04-arm
-    # Run for tag pushes, main pushes, and manual dispatch.
+    runs-on: ubuntu-24.04
     if: always() && needs.image.result == 'success' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Download GNOME archive
-        uses: actions/download-artifact@v4
-        with:
-          name: ubuntu-pipa-gnome
-          path: tag-assets/
-
-      - name: Download Plasma archive
-        uses: actions/download-artifact@v4
-        with:
-          name: ubuntu-pipa-plasma
-          path: tag-assets/
-
-      - name: Resolve tag name
-        id: meta
+      - name: Create or confirm build tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           DATE=$(date -u +%Y%m%d)
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF_NAME}"
+            echo "Build already tagged as ${TAG}"
           else
-            # Main / manual builds get a dated build tag on this commit.
             TAG="build-${DATE}-${SHORT_SHA}"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -f "$TAG" "$GITHUB_SHA"
-            git push -f origin "refs/tags/$TAG"
-          fi
+            NOTES="$(cat <<EOF
+          Ubuntu 26.04 for Xiaomi Pad 6 (pipa)
 
-          {
-            echo "tag=${TAG}"
-            echo "date=${DATE}"
-          } >> "$GITHUB_OUTPUT"
-
-          find tag-assets -type f \( -name '*.tar.xz' -o -name '*.sha256' \) -printf '%p\n' | sort
-
-          cat > tag-notes.md <<EOF
-          ## Ubuntu 26.04 for Xiaomi Pad 6 (pipa)
-
-          Tag: \`${TAG}\`
+          Tag: ${TAG}
           Build date: ${DATE}
-          Commit: \`${GITHUB_SHA}\`
+          Commit: ${GITHUB_SHA}
 
-          ### Downloads (separate per desktop)
+          Archives are workflow artifacts (not a GitHub Release — files exceed
+          the release asset size limit). Download from:
+          ${RUN_URL}
 
-          | Variant | Archive |
-          |---------|---------|
-          | GNOME   | \`ubuntu-pipa-gnome-*.tar.xz\` |
-          | Plasma  | \`ubuntu-pipa-plasma-*.tar.xz\` |
-
-          Each archive contains flashables for that variant only:
-          \`ubuntu_rootfs.raw\`, \`ubuntu_boot.raw\`, \`ubuntu_esp.raw\`,
-          \`silicium.img\`, \`vbmeta-disabled.img\`, \`flash.sh\`, and
-          \`flash-multiboot.sh\`.
-
-          ### Flash
-
-          \`\`\`bash
-          tar -xJf ubuntu-pipa-gnome-YYYYMMDD.tar.xz
-          cd ubuntu-pipa-gnome-YYYYMMDD
-          ./flash.sh
-          \`\`\`
+          Artifacts: ubuntu-pipa-gnome, ubuntu-pipa-plasma
           EOF
-          sed -i 's/^          //' tag-notes.md
-
-      - name: Upload assets to tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="${{ steps.meta.outputs.tag }}"
-          TITLE="Ubuntu Pipa ${TAG}"
-          mapfile -t ASSETS < <(find tag-assets -type f \( -name '*.tar.xz' -o -name '*.sha256' \) | sort)
-          if [ "${#ASSETS[@]}" -eq 0 ]; then
-            echo "No tag assets found"
-            exit 1
+          )"
+            # Strip common indent from the heredoc body.
+            NOTES="$(printf '%s\n' "$NOTES" | sed 's/^          //')"
+            git tag -f -a "$TAG" "$GITHUB_SHA" -m "$NOTES"
+            git push -f origin "refs/tags/$TAG"
+            echo "Created annotated tag ${TAG}"
           fi
 
+          # Drop any Release that would re-introduce oversized assets for this tag.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Updating assets on existing tag $TAG"
-            gh release upload "$TAG" "${ASSETS[@]}" --clobber
-            gh release edit "$TAG" --title "$TITLE" --notes-file tag-notes.md --latest=false
-          else
-            echo "Creating tag asset bundle for $TAG"
-            gh release create "$TAG" "${ASSETS[@]}" \
-              --verify-tag \
-              --title "$TITLE" \
-              --notes-file tag-notes.md \
-              --latest=false
+            echo "Deleting GitHub Release for ${TAG} (keep tag; use Actions artifacts)"
+            gh release delete "$TAG" --yes
           fi

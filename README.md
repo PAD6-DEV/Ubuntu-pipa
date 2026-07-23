@@ -63,11 +63,13 @@ sudo ./scripts/build-all.sh gnome
 
 ## Flashing
 
-Download the variant you want from a
-[git tag](https://github.com/PAD6-DEV/Ubuntu-pipa/tags) (each desktop is a
-separate `.tar.xz` attached to the tag). Successful `main` / manual builds
-create a `build-YYYYMMDD-<sha>` tag and attach the archives there; push a
-`v*` / `nightly-*` tag yourself for a named release.
+Download the variant you want from the matching
+[Actions run](https://github.com/PAD6-DEV/Ubuntu-pipa/actions) artifacts
+(`ubuntu-pipa-gnome` / `ubuntu-pipa-plasma`). Successful `main` / manual
+builds also create a `build-YYYYMMDD-<sha>`
+[git tag](https://github.com/PAD6-DEV/Ubuntu-pipa/tags) pointing at the
+commit (no GitHub Release — the archives exceed the release asset size
+limit). Push a `v*` / `nightly-*` tag yourself for a named build marker.
 
 Then:
 
