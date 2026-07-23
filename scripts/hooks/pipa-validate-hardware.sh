@@ -58,6 +58,25 @@ if [ -f /etc/gdm3/custom.conf ] || [ -L /etc/systemd/system/display-manager.serv
     done
     ok "gdm root autologin pam"
 fi
+if [ -f /etc/sddm.conf.d/10-firstboot-autologin.conf ]; then
+    grep -q '^User=root' /etc/sddm.conf.d/10-firstboot-autologin.conf \
+        || fail "SDDM firstboot autologin user is not root"
+    [ -f /etc/sddm.conf.d/00-root-login.conf ] \
+        || fail "SDDM MinimumUid=0 config missing"
+    grep -q 'MinimumUid=0' /etc/sddm.conf.d/00-root-login.conf \
+        || fail "SDDM MinimumUid is not 0"
+    for pam in /etc/pam.d/sddm /etc/pam.d/sddm-autologin; do
+        if [ -f "$pam" ] && grep -q 'pam_succeed_if.so.*user != root' "$pam"; then
+            fail "$pam still blocks root autologin"
+        fi
+    done
+    [ -f /root/.config/kwinrc ] || fail "Plasma KWin virtual keyboard config missing for root"
+    grep -q '^InputMethod=' /root/.config/kwinrc \
+        || fail "Plasma KWin InputMethod not set for virtual keyboard"
+    dpkg -l plasma-keyboard 2>/dev/null | grep -q '^ii' \
+        || fail "plasma-keyboard package not installed"
+    ok "sddm root autologin + plasma keyboard"
+fi
 if mountpoint -q /boot/efi 2>/dev/null || [ -d /boot/efi/EFI ]; then
     [ -f /boot/efi/EFI/ubuntu/grubaa64.efi ] || [ -f /boot/efi/EFI/BOOT/grubaa64.efi ] \
         || fail "ESP missing grubaa64.efi"

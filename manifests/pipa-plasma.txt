@@ -1,6 +1,7 @@
 # Plasma / Kubuntu desktop variant
 kubuntu-desktop
 sddm
+plasma-keyboard
 kdialog
 firefox
 libreoffice-writer

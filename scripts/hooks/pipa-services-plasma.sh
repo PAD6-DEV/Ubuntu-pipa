@@ -42,3 +42,32 @@ cat > /etc/environment.d/90-plasma-keyboard.conf <<'EOF'
 KWIN_IM_SHOW_ALWAYS=1
 PLASMA_KEYBOARD_USE_QT_LAYOUTS=1
 EOF
+
+# Wire Plasma's virtual keyboard into KWin for root (firstboot) and new users.
+desktop_file=""
+for candidate in \
+    /usr/share/applications/org.kde.plasma.keyboard.desktop \
+    /usr/share/applications/org.kde.plasma-keyboard.desktop \
+    /usr/share/applications/plasma-keyboard.desktop
+do
+    if [ -f "$candidate" ]; then
+        desktop_file="$candidate"
+        break
+    fi
+done
+if [ -z "$desktop_file" ]; then
+    desktop_file="$(grep -rl '^X-KDE-Wayland-VirtualKeyboard=true' /usr/share/applications 2>/dev/null \
+        | grep -i plasma | head -n1 || true)"
+fi
+if [ -n "$desktop_file" ]; then
+    for config_root in /root /etc/skel; do
+        install -d "$config_root/.config"
+        cat > "$config_root/.config/kwinrc" <<EOF
+[Wayland]
+InputMethod=$desktop_file
+EOF
+    done
+    echo "pipa-services-plasma: KWin InputMethod=$desktop_file"
+else
+    echo "pipa-services-plasma: WARNING: plasma-keyboard desktop file not found" >&2
+fi

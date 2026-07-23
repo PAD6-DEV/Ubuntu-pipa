@@ -150,7 +150,7 @@ cat > /etc/hosts <<HOSTS
 HOSTS
 
 case "$PIPA_FIRSTBOOT_DM" in
-    sddm) rm -f /etc/sddm.conf.d/10-firstboot-autologin.conf ;;
+    sddm) rm -f /etc/sddm.conf.d/10-firstboot-autologin.conf /etc/sddm.conf.d/00-root-login.conf ;;
     gdm) rm -f /etc/gdm3/custom.conf /etc/gdm/custom.conf.d/10-firstboot-autologin.conf ;;
 esac
 rm -f "$AUTOSTART_FILE" "$SENTINEL"
@@ -162,19 +162,36 @@ SETUP_EOF
 case "$FIRSTBOOT_DM" in
     sddm)
         SESSION_FILE="$(first_existing_file \
-            /usr/share/wayland-sessions/plasmawayland.desktop \
             /usr/share/wayland-sessions/plasma.desktop \
+            /usr/share/wayland-sessions/plasmawayland.desktop \
             /usr/share/xsessions/plasma.desktop \
-        )" || SESSION_FILE="/usr/share/wayland-sessions/plasma.desktop"
-        SESSION_NAME="$(basename "${SESSION_FILE:-plasma}" .desktop)"
+        )" || {
+            echo "pipa-firstboot-install: no Plasma session desktop found for SDDM" >&2
+            exit 1
+        }
+        SESSION_NAME="$(basename "$SESSION_FILE" .desktop)"
 
         install -d /etc/sddm.conf.d
+        # SDDM rejects uid 0 unless MinimumUid is lowered for firstboot.
+        cat > /etc/sddm.conf.d/00-root-login.conf <<'EOF'
+[Users]
+MinimumUid=0
+EOF
         cat > /etc/sddm.conf.d/10-firstboot-autologin.conf <<EOF
 [Autologin]
 User=root
 Session=$SESSION_NAME
 Relogin=false
+
+[General]
+DisplayServer=wayland
 EOF
+        # Ubuntu SDDM PAM blocks root; firstboot needs root autologin.
+        for pam in /etc/pam.d/sddm /etc/pam.d/sddm-autologin; do
+            if [ -f "$pam" ]; then
+                sed -i '/pam_succeed_if.so.*user != root/d' "$pam"
+            fi
+        done
         ;;
     gdm)
         SESSION_FILE="$(first_existing_file \

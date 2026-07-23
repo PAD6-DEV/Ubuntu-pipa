@@ -305,6 +305,7 @@ announce() {
 announce "Xiaomi Pad 6 single-boot flasher"
 announce "This mode flashes Ubuntu rootfs to userdata."
 announce "Android userdata will be overwritten."
+announce "First Linux flash usually needs dtbo erase + disabled vbmeta."
 echo
 
 ERASE_DTBO="${ERASE_DTBO:-}"
@@ -340,11 +341,11 @@ announce "Verifying connected device"
 fastboot getvar product 2>&1 | grep pipa
 
 if [ -z "$ERASE_DTBO" ]; then
-    ERASE_DTBO="$(choose_yes_no 'Erase dtbo_ab before flashing?' 'no')"
+    ERASE_DTBO="$(choose_yes_no 'Erase dtbo_ab before flashing? (needed to avoid fastboot loops)' 'yes')"
 fi
 
 if [ -z "$FLASH_VBMETA" ]; then
-    FLASH_VBMETA="$(choose_yes_no 'Flash disabled vbmeta to vbmeta_ab?' 'no')"
+    FLASH_VBMETA="$(choose_yes_no 'Flash disabled vbmeta to vbmeta_ab? (needed for Mu-Silicium)' 'yes')"
 fi
 
 announce "Flash plan"
@@ -354,6 +355,7 @@ echo "Mu-Silicium boot      -> boot_ab"
 echo "Ubuntu EFI image      -> rawdump"
 echo "Ubuntu boot           -> cust"
 echo "Ubuntu rootfs         -> userdata"
+echo "Refresh A/B slot      -> yes (set_active toggle)"
 echo
 
 read -r -p "Proceed with flashing? [Y/n]: " CONFIRM_FLASH
@@ -379,6 +381,25 @@ fi
 announce "Flashing Mu-Silicium boot image to boot_ab"
 fastboot flash boot_ab silicium.img
 
+# Flashing boot_ab can leave the current slot marked unbootable until the
+# active slot is toggled (otherwise the device re-enters fastboot).
+refresh_boot_slot() {
+    local current other
+    current="$(fastboot getvar current-slot 2>&1 | sed -n 's/^current-slot:[[:space:]]*//p' | tr -d '\r' | head -n1)"
+    case "$current" in
+        a) other=b ;;
+        b) other=a ;;
+        *)
+            announce "current-slot unavailable ($current); forcing slot a"
+            fastboot set_active a
+            return 0
+            ;;
+    esac
+    announce "Refreshing A/B slot state ($current -> $other -> $current)"
+    fastboot set_active "$other"
+    fastboot set_active "$current"
+}
+
 announce "Flashing Ubuntu EFI image to rawdump"
 fastboot flash rawdump ubuntu_esp.raw
 
@@ -387,6 +408,8 @@ fastboot flash cust ubuntu_boot.raw
 
 announce "Flashing Ubuntu rootfs image to userdata"
 fastboot flash userdata ubuntu_rootfs.raw
+
+refresh_boot_slot
 
 announce "Rebooting device"
 fastboot reboot
@@ -443,6 +466,7 @@ prompt_with_default() {
 announce "Xiaomi Pad 6 multiboot flasher"
 announce "This mode flashes Ubuntu rootfs to a dedicated partition such as linux."
 announce "It does not use userdata unless you explicitly choose that partition."
+announce "First Linux flash usually needs dtbo erase + disabled vbmeta."
 announce "Press Enter to accept the default shown in brackets."
 echo
 
@@ -465,13 +489,13 @@ if [ -z "$ROOTFS_PARTITION" ]; then
 fi
 
 if [ -z "$ERASE_DTBO" ]; then
-    ERASE_DTBO="$(choose_from_menu 'Erase dtbo_ab before flashing?' 1 \
+    ERASE_DTBO="$(choose_from_menu 'Erase dtbo_ab before flashing? (needed to avoid fastboot loops)' 2 \
         'no' \
         'yes')"
 fi
 
 if [ -z "$FLASH_VBMETA" ]; then
-    FLASH_VBMETA="$(choose_from_menu 'Flash disabled vbmeta to vbmeta_ab?' 1 \
+    FLASH_VBMETA="$(choose_from_menu 'Flash disabled vbmeta to vbmeta_ab? (needed for Mu-Silicium)' 2 \
         'no' \
         'yes')"
 fi
@@ -530,6 +554,7 @@ echo "Ubuntu EFI image      -> $ESP_PARTITION"
 echo "Ubuntu boot           -> $BOOT_PARTITION"
 echo "Ubuntu rootfs         -> $ROOTFS_PARTITION"
 echo "Erase dtbo_ab         -> $ERASE_DTBO"
+echo "Refresh A/B slot      -> yes (set_active toggle)"
 echo
 echo
 
@@ -559,6 +584,36 @@ fastboot flash "$BOOT_PARTITION" ubuntu_boot.raw
 
 announce "Flashing Ubuntu rootfs image to $ROOTFS_PARTITION"
 fastboot flash "$ROOTFS_PARTITION" ubuntu_rootfs.raw
+
+# Flashing boot_* can leave a slot marked unbootable until active slot is
+# refreshed (otherwise the device re-enters fastboot).
+refresh_boot_slot() {
+    local wanted="$1"
+    local current other target
+    current="$(fastboot getvar current-slot 2>&1 | sed -n 's/^current-slot:[[:space:]]*//p' | tr -d '\r' | head -n1)"
+    case "$wanted" in
+        boot_a) target=a ;;
+        boot_b) target=b ;;
+        boot_ab)
+            case "$current" in
+                a|b) target="$current" ;;
+                *) target=a ;;
+            esac
+            ;;
+        *)
+            target=a
+            ;;
+    esac
+    case "$target" in
+        a) other=b ;;
+        b) other=a ;;
+    esac
+    announce "Refreshing A/B slot state (want $target; $current -> $other -> $target)"
+    fastboot set_active "$other"
+    fastboot set_active "$target"
+}
+
+refresh_boot_slot "$BOOT_SLOT_TARGET"
 
 announce "Rebooting device"
 fastboot reboot

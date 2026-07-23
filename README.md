@@ -89,7 +89,10 @@ cd ubuntu-pipa-gnome-YYYYMMDD
 
 Both scripts can also be driven non-interactively with env vars
 (`ERASE_DTBO`, `FLASH_VBMETA`; multiboot also accepts `BOOT_SLOT_TARGET`,
-`ROOTFS_PARTITION`).
+`ROOTFS_PARTITION`). Defaults are **yes** for erasing `dtbo_ab` and flashing
+disabled `vbmeta`. After flashing Mu-Silicium the scripts also toggle the
+A/B active slot (`set_active` other → current) so the tablet does not stick
+in a fastboot loop.
 
 | Artifact | Fastboot target |
 |----------|-----------------|
