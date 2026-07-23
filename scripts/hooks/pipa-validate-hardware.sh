@@ -33,14 +33,19 @@ grep -qw quiet /etc/cmdline 2>/dev/null || fail "cmdline missing quiet"
 command -v plymouth >/dev/null 2>&1 || fail "plymouth missing"
 [ -d /usr/share/plymouth/themes/spinner ] || fail "plymouth spinner theme missing"
 # Initramfs must not bake the image-build host root UUID.
+# Extract into a temp dir — never cwd — so we cannot clobber or rm -rf /etc.
 if command -v zstdcat >/dev/null 2>&1; then
     initrd="$(ls /usr/lib/modules/*/initramfs-*.img 2>/dev/null | head -n1 || true)"
-    if [ -n "$initrd" ] && zstdcat "$initrd" 2>/dev/null \
-        | cpio -idm etc/cmdline.d/20-root-dev.conf 2>/dev/null \
-        && grep -q 'root=UUID=' etc/cmdline.d/20-root-dev.conf 2>/dev/null; then
-        fail "initramfs contains hostonly root UUID"
+    if [ -n "$initrd" ]; then
+        check_dir="$(mktemp -d)"
+        if zstdcat "$initrd" 2>/dev/null \
+            | (cd "$check_dir" && cpio -idm etc/cmdline.d/20-root-dev.conf 2>/dev/null) \
+            && grep -q 'root=UUID=' "$check_dir/etc/cmdline.d/20-root-dev.conf" 2>/dev/null; then
+            rm -rf "$check_dir"
+            fail "initramfs contains hostonly root UUID"
+        fi
+        rm -rf "$check_dir"
     fi
-    rm -rf etc 2>/dev/null || true
 fi
 [ -d /usr/share/plymouth/themes/spinner ] || fail "plymouth spinner theme missing"
 [ -f /etc/cloud/cloud-init.disabled ] || fail "cloud-init not disabled"
