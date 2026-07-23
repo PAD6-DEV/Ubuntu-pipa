@@ -43,7 +43,20 @@ KWIN_IM_SHOW_ALWAYS=1
 PLASMA_KEYBOARD_USE_QT_LAYOUTS=1
 EOF
 
-# Wire Plasma's virtual keyboard into KWin for root (firstboot) and new users.
+# SDDM greeter virtual keyboard (Wayland + KWin). Do not set General
+# InputMethod= here — that hides the keyboard with a Wayland greeter.
+install -d /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/11-virtual-keyboard.conf <<'EOF'
+[General]
+DisplayServer=wayland
+GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell,KWIN_IM_SHOW_ALWAYS=1,PLASMA_KEYBOARD_USE_QT_LAYOUTS=1
+
+[Wayland]
+CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1 --inputmethod plasma-keyboard
+EOF
+
+# Wire Plasma's virtual keyboard into KWin for root (firstboot), new users,
+# system defaults, and the sddm greeter user.
 desktop_file=""
 for candidate in \
     /usr/share/applications/org.kde.plasma.keyboard.desktop \
@@ -60,13 +73,24 @@ if [ -z "$desktop_file" ]; then
         | grep -i plasma | head -n1 || true)"
 fi
 if [ -n "$desktop_file" ]; then
-    for config_root in /root /etc/skel; do
+    for config_root in /root /etc/skel /var/lib/sddm; do
         install -d "$config_root/.config"
         cat > "$config_root/.config/kwinrc" <<EOF
 [Wayland]
 InputMethod=$desktop_file
+VirtualKeyboardEnabled=true
 EOF
     done
+    # System-wide KWin defaults for all users.
+    install -d /etc/xdg
+    cat > /etc/xdg/kwinrc <<EOF
+[Wayland]
+InputMethod=$desktop_file
+VirtualKeyboardEnabled=true
+EOF
+    if id sddm >/dev/null 2>&1; then
+        chown -R sddm:sddm /var/lib/sddm/.config 2>/dev/null || true
+    fi
     echo "pipa-services-plasma: KWin InputMethod=$desktop_file"
 else
     echo "pipa-services-plasma: WARNING: plasma-keyboard desktop file not found" >&2

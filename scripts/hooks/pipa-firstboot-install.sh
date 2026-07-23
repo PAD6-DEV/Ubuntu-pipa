@@ -185,9 +185,6 @@ EOF
 User=root
 Session=$SESSION_NAME
 Relogin=false
-
-[General]
-DisplayServer=wayland
 EOF
         # Ubuntu SDDM PAM blocks root; firstboot needs root login/autologin.
         for pam in /etc/pam.d/sddm /etc/pam.d/sddm-autologin; do

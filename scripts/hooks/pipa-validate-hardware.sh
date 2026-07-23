@@ -73,6 +73,12 @@ if [ -f /etc/sddm.conf.d/10-firstboot-autologin.conf ]; then
     [ -f /root/.config/kwinrc ] || fail "Plasma KWin virtual keyboard config missing for root"
     grep -q '^InputMethod=' /root/.config/kwinrc \
         || fail "Plasma KWin InputMethod not set for virtual keyboard"
+    grep -q '^VirtualKeyboardEnabled=true' /root/.config/kwinrc \
+        || fail "Plasma KWin VirtualKeyboardEnabled not set"
+    [ -f /etc/sddm.conf.d/11-virtual-keyboard.conf ] \
+        || fail "SDDM virtual keyboard Wayland config missing"
+    grep -q -- '--inputmethod plasma-keyboard' /etc/sddm.conf.d/11-virtual-keyboard.conf \
+        || fail "SDDM CompositorCommand missing plasma-keyboard inputmethod"
     dpkg -l plasma-keyboard 2>/dev/null | grep -q '^ii' \
         || fail "plasma-keyboard package not installed"
     # Root must have a real password hash (not locked !/*) for SDDM fallback login.
