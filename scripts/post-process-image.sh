@@ -298,32 +298,97 @@ cat > "$OUTPUT_DIR/flash.sh" <<'FLASH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "### Ubuntu - Xiaomi Pad 6 single-boot flasher"
-echo "### This flashes Ubuntu rootfs to userdata."
+announce() {
+    printf '### %s\n' "$1"
+}
+
+announce "Xiaomi Pad 6 single-boot flasher"
+announce "This mode flashes Ubuntu rootfs to userdata."
+announce "Android userdata will be overwritten."
 echo
 
-echo "### Verifying connected device..."
+ERASE_DTBO="${ERASE_DTBO:-}"
+FLASH_VBMETA="${FLASH_VBMETA:-}"
+
+choose_yes_no() {
+    local prompt="$1"
+    local default_answer="$2"
+    local answer
+
+    while true; do
+        read -r -p "$prompt [$default_answer]: " answer
+        if [ -z "$answer" ]; then
+            answer="$default_answer"
+        fi
+
+        case "$answer" in
+            y|Y|yes|YES)
+                printf 'yes\n'
+                return 0
+                ;;
+            n|N|no|NO)
+                printf 'no\n'
+                return 0
+                ;;
+        esac
+
+        echo "Please answer yes or no."
+    done
+}
+
+announce "Verifying connected device"
 fastboot getvar product 2>&1 | grep pipa
 
-read -r -p "Proceed with flashing? [Y/n]: " CONFIRM
-case "${CONFIRM:-Y}" in
-    y|Y|yes|YES|"") ;;
-    *) echo "Aborted."; exit 0 ;;
+if [ -z "$ERASE_DTBO" ]; then
+    ERASE_DTBO="$(choose_yes_no 'Erase dtbo_ab before flashing?' 'no')"
+fi
+
+if [ -z "$FLASH_VBMETA" ]; then
+    FLASH_VBMETA="$(choose_yes_no 'Flash disabled vbmeta to vbmeta_ab?' 'no')"
+fi
+
+announce "Flash plan"
+echo "Erase dtbo_ab         -> $ERASE_DTBO"
+echo "Flash vbmeta_ab       -> $FLASH_VBMETA"
+echo "Mu-Silicium boot      -> boot_ab"
+echo "Ubuntu EFI image      -> rawdump"
+echo "Ubuntu boot           -> cust"
+echo "Ubuntu rootfs         -> userdata"
+echo
+
+read -r -p "Proceed with flashing? [Y/n]: " CONFIRM_FLASH
+case "${CONFIRM_FLASH:-Y}" in
+    y|Y|yes|YES|"")
+        ;;
+    *)
+        echo "Aborted."
+        exit 0
+        ;;
 esac
 
-echo "### Flashing Mu-Silicium to boot_ab"
+if [ "$ERASE_DTBO" = "yes" ]; then
+    announce "Erasing dtbo_ab"
+    fastboot erase dtbo_ab
+fi
+
+if [ "$FLASH_VBMETA" = "yes" ]; then
+    announce "Flashing vbmeta_ab"
+    fastboot flash vbmeta_ab vbmeta-disabled.img
+fi
+
+announce "Flashing Mu-Silicium boot image to boot_ab"
 fastboot flash boot_ab silicium.img
 
-echo "### Flashing ESP to rawdump"
+announce "Flashing Ubuntu EFI image to rawdump"
 fastboot flash rawdump ubuntu_esp.raw
 
-echo "### Flashing boot to cust"
+announce "Flashing Ubuntu boot image to cust"
 fastboot flash cust ubuntu_boot.raw
 
-echo "### Flashing rootfs to userdata"
+announce "Flashing Ubuntu rootfs image to userdata"
 fastboot flash userdata ubuntu_rootfs.raw
 
-echo "### Rebooting..."
+announce "Rebooting device"
 fastboot reboot
 FLASH
 chmod +x "$OUTPUT_DIR/flash.sh"
@@ -332,35 +397,170 @@ cat > "$OUTPUT_DIR/flash-multiboot.sh" <<'MFLASH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "### Ubuntu - Xiaomi Pad 6 multiboot flasher"
-echo "### This flashes rootfs to a dedicated partition."
+announce() {
+    printf '### %s\n' "$1"
+}
+
+choose_from_menu() {
+    local prompt="$1"
+    local default_index="$2"
+    shift 2
+
+    local options=("$@")
+    local answer
+    local index
+
+    echo "$prompt" >&2
+    for index in "${!options[@]}"; do
+        printf '  %d) %s\n' "$((index + 1))" "${options[$index]}" >&2
+    done
+
+    while true; do
+        read -r -p "Select an option [$default_index]: " answer
+        if [ -z "$answer" ]; then
+            answer="$default_index"
+        fi
+        if [[ "$answer" =~ ^[0-9]+$ ]] && [ "$answer" -ge 1 ] && [ "$answer" -le "${#options[@]}" ]; then
+            printf '%s\n' "${options[$((answer - 1))]}"
+            return 0
+        fi
+        echo "Invalid selection: $answer" >&2
+    done
+}
+
+prompt_with_default() {
+    local prompt="$1"
+    local default_value="$2"
+    local value
+
+    read -r -p "$prompt [$default_value]: " value
+    if [ -z "$value" ]; then
+        value="$default_value"
+    fi
+    printf '%s\n' "$value"
+}
+
+announce "Xiaomi Pad 6 multiboot flasher"
+announce "This mode flashes Ubuntu rootfs to a dedicated partition such as linux."
+announce "It does not use userdata unless you explicitly choose that partition."
+announce "Press Enter to accept the default shown in brackets."
 echo
 
-ROOTFS_PART="${1:-linux}"
-BOOT_SLOT="${2:-boot_ab}"
+BOOT_SLOT_TARGET="${BOOT_SLOT_TARGET:-}"
+ROOTFS_PARTITION="${ROOTFS_PARTITION:-}"
+ERASE_DTBO="${ERASE_DTBO:-}"
+FLASH_VBMETA="${FLASH_VBMETA:-}"
+ESP_PARTITION="rawdump"
+BOOT_PARTITION="cust"
 
-echo "### Verifying connected device..."
-fastboot getvar product 2>&1 | grep pipa
+if [ -z "$BOOT_SLOT_TARGET" ]; then
+    BOOT_SLOT_TARGET="$(choose_from_menu 'Choose the boot slot target:' 3 \
+        'boot_a' \
+        'boot_b' \
+        'boot_ab')"
+fi
 
-echo "Flash plan:"
-echo "  Mu-Silicium  -> $BOOT_SLOT"
-echo "  ESP          -> rawdump"
-echo "  boot         -> cust"
-echo "  rootfs       -> $ROOTFS_PART"
-echo
+if [ -z "$ROOTFS_PARTITION" ]; then
+    ROOTFS_PARTITION="$(prompt_with_default 'Dedicated root filesystem partition name' 'linux')"
+fi
 
-read -r -p "Proceed? [Y/n]: " CONFIRM
-case "${CONFIRM:-Y}" in
-    y|Y|yes|YES|"") ;;
-    *) echo "Aborted."; exit 0 ;;
+if [ -z "$ERASE_DTBO" ]; then
+    ERASE_DTBO="$(choose_from_menu 'Erase dtbo_ab before flashing?' 1 \
+        'no' \
+        'yes')"
+fi
+
+if [ -z "$FLASH_VBMETA" ]; then
+    FLASH_VBMETA="$(choose_from_menu 'Flash disabled vbmeta to vbmeta_ab?' 1 \
+        'no' \
+        'yes')"
+fi
+
+case "$BOOT_SLOT_TARGET" in
+    boot_a|boot_b|boot_ab) ;;
+    *)
+        echo "Unsupported boot slot target: $BOOT_SLOT_TARGET" >&2
+        exit 1
+        ;;
 esac
 
-fastboot flash "$BOOT_SLOT" silicium.img
-fastboot flash rawdump ubuntu_esp.raw
-fastboot flash cust ubuntu_boot.raw
-fastboot flash "$ROOTFS_PART" ubuntu_rootfs.raw
+case "$ERASE_DTBO" in
+    yes|y|Y)
+        ERASE_DTBO="yes"
+        ;;
+    no|n|N)
+        ERASE_DTBO="no"
+        ;;
+    *)
+        echo "ERASE_DTBO must be yes or no" >&2
+        exit 1
+        ;;
+esac
 
-echo "### Rebooting..."
+case "$FLASH_VBMETA" in
+    yes|y|Y)
+        FLASH_VBMETA="yes"
+        ;;
+    no|n|N)
+        FLASH_VBMETA="no"
+        ;;
+    *)
+        echo "FLASH_VBMETA must be yes or no" >&2
+        exit 1
+        ;;
+esac
+
+if [[ ! "$ROOTFS_PARTITION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Invalid root filesystem partition name: $ROOTFS_PARTITION" >&2
+    exit 1
+fi
+
+announce "Verifying connected device"
+fastboot getvar product 2>&1 | grep pipa
+
+if [ "$ERASE_DTBO" = "yes" ]; then
+    announce "Erasing dtbo_ab"
+    fastboot erase dtbo_ab
+fi
+
+announce "Flash plan"
+echo "vbmeta image          -> vbmeta_ab"
+echo "Flash vbmeta_ab       -> $FLASH_VBMETA"
+echo "Ubuntu EFI image      -> $ESP_PARTITION"
+echo "Ubuntu boot           -> $BOOT_PARTITION"
+echo "Ubuntu rootfs         -> $ROOTFS_PARTITION"
+echo "Erase dtbo_ab         -> $ERASE_DTBO"
+echo
+echo
+
+read -r -p "Proceed with flashing? [Y/n]: " CONFIRM_FLASH
+case "${CONFIRM_FLASH:-Y}" in
+    y|Y|yes|YES|"")
+        ;;
+    *)
+        echo "Aborted."
+        exit 0
+        ;;
+esac
+
+if [ "$FLASH_VBMETA" = "yes" ]; then
+    announce "Flashing vbmeta_ab"
+    fastboot flash vbmeta_ab vbmeta-disabled.img
+fi
+
+announce "Flashing Mu-Silicium boot image to $BOOT_SLOT_TARGET"
+fastboot flash "$BOOT_SLOT_TARGET" silicium.img
+
+announce "Flashing Ubuntu EFI image to $ESP_PARTITION"
+fastboot flash "$ESP_PARTITION" ubuntu_esp.raw
+
+announce "Flashing Ubuntu boot image to $BOOT_PARTITION"
+fastboot flash "$BOOT_PARTITION" ubuntu_boot.raw
+
+announce "Flashing Ubuntu rootfs image to $ROOTFS_PARTITION"
+fastboot flash "$ROOTFS_PARTITION" ubuntu_rootfs.raw
+
+announce "Rebooting device"
 fastboot reboot
 MFLASH
 chmod +x "$OUTPUT_DIR/flash-multiboot.sh"
