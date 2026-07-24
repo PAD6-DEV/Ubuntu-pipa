@@ -13,7 +13,7 @@ BOOT_LABEL="boot"
 ESP_LABEL="UBPIPAESP"
 
 SILICIUM_URL="https://github.com/onesaladleaf/Mu-Silicium/releases/download/v3.5-pocketblue/Mu-pipa.img"
-VBMETA_DISABLED="$REPO_ROOT/assets/vbmeta-disabled.img"
+VBMETA_IMG="$REPO_ROOT/assets/vbmeta.img"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Must be run as root"
@@ -287,10 +287,10 @@ if [ ! -f "$OUTPUT_DIR/silicium.img" ]; then
 fi
 
 echo "=== Copying vbmeta ==="
-if [ -f "$VBMETA_DISABLED" ]; then
-    cp "$VBMETA_DISABLED" "$OUTPUT_DIR/vbmeta-disabled.img"
+if [ -f "$VBMETA_IMG" ]; then
+    cp "$VBMETA_IMG" "$OUTPUT_DIR/vbmeta.img"
 else
-    echo "WARNING: vbmeta-disabled.img not found at $VBMETA_DISABLED"
+    echo "WARNING: vbmeta.img not found at $VBMETA_IMG"
 fi
 
 echo "=== Writing flash scripts ==="
@@ -305,7 +305,7 @@ announce() {
 announce "Xiaomi Pad 6 single-boot flasher"
 announce "This mode flashes Ubuntu rootfs to userdata."
 announce "Android userdata will be overwritten."
-announce "First Linux flash usually needs dtbo erase + disabled vbmeta."
+announce "First Linux flash usually needs dtbo erase + vbmeta."
 echo
 
 ERASE_DTBO="${ERASE_DTBO:-}"
@@ -345,7 +345,7 @@ if [ -z "$ERASE_DTBO" ]; then
 fi
 
 if [ -z "$FLASH_VBMETA" ]; then
-    FLASH_VBMETA="$(choose_yes_no 'Flash disabled vbmeta to vbmeta_ab? (needed for Mu-Silicium)' 'yes')"
+    FLASH_VBMETA="$(choose_yes_no 'Flash vbmeta.img to vbmeta_ab? (needed for Mu-Silicium)' 'yes')"
 fi
 
 announce "Flash plan"
@@ -375,7 +375,7 @@ fi
 
 if [ "$FLASH_VBMETA" = "yes" ]; then
     announce "Flashing vbmeta_ab"
-    fastboot flash vbmeta_ab vbmeta-disabled.img
+    fastboot flash vbmeta_ab vbmeta.img
 fi
 
 announce "Flashing Mu-Silicium boot image to boot_ab"
@@ -466,7 +466,7 @@ prompt_with_default() {
 announce "Xiaomi Pad 6 multiboot flasher"
 announce "This mode flashes Ubuntu rootfs to a dedicated partition such as linux."
 announce "It does not use userdata unless you explicitly choose that partition."
-announce "First Linux flash usually needs dtbo erase + disabled vbmeta."
+announce "First Linux flash usually needs dtbo erase + vbmeta."
 announce "Press Enter to accept the default shown in brackets."
 echo
 
@@ -495,7 +495,7 @@ if [ -z "$ERASE_DTBO" ]; then
 fi
 
 if [ -z "$FLASH_VBMETA" ]; then
-    FLASH_VBMETA="$(choose_from_menu 'Flash disabled vbmeta to vbmeta_ab? (needed for Mu-Silicium)' 2 \
+    FLASH_VBMETA="$(choose_from_menu 'Flash vbmeta.img to vbmeta_ab? (needed for Mu-Silicium)' 2 \
         'no' \
         'yes')"
 fi
@@ -570,7 +570,7 @@ esac
 
 if [ "$FLASH_VBMETA" = "yes" ]; then
     announce "Flashing vbmeta_ab"
-    fastboot flash vbmeta_ab vbmeta-disabled.img
+    fastboot flash vbmeta_ab vbmeta.img
 fi
 
 announce "Flashing Mu-Silicium boot image to $BOOT_SLOT_TARGET"

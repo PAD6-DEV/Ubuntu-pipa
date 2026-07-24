@@ -22,7 +22,7 @@ ubuntu-pipa/
 │   ├── post-process-image.sh
 │   ├── ci-build.sh / build-all.sh
 │   └── hooks/           # chroot post-install scripts
-├── assets/              # vbmeta-disabled.img
+├── assets/              # vbmeta.img
 ├── Dockerfile
 └── Makefile
 ```
@@ -90,7 +90,7 @@ cd ubuntu-pipa-gnome-YYYYMMDD
 Both scripts can also be driven non-interactively with env vars
 (`ERASE_DTBO`, `FLASH_VBMETA`; multiboot also accepts `BOOT_SLOT_TARGET`,
 `ROOTFS_PARTITION`). Defaults are **yes** for erasing `dtbo_ab` and flashing
-disabled `vbmeta`. After flashing Mu-Silicium the scripts also toggle the
+`vbmeta.img`. After flashing Mu-Silicium the scripts also toggle the
 A/B active slot (`set_active` other → current) so the tablet does not stick
 in a fastboot loop.
 
@@ -100,7 +100,7 @@ in a fastboot loop.
 | `ubuntu_esp.raw` | `rawdump` |
 | `ubuntu_boot.raw` | `cust` |
 | `ubuntu_rootfs.raw` | `userdata` (single-boot) or e.g. `linux` (multiboot) |
-| `vbmeta-disabled.img` | `vbmeta_ab` (optional) |
+| `vbmeta.img` | `vbmeta_ab` (optional) |
 
 ## First boot
 
