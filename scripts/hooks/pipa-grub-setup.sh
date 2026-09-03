@@ -3,7 +3,7 @@ set -eux
 
 ROOTFS_LABEL="${ROOTFS_LABEL:-ub-pipa}"
 BOOT_LABEL="${BOOT_LABEL:-boot}"
-CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 earlycon quiet splash clk_ignore_unused pd_ignore_unused"
+CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 quiet splash clk_ignore_unused pd_ignore_unused"
 
 printf '%s\n' "$CMDLINE" > /etc/cmdline
 mkdir -p /boot
@@ -59,11 +59,11 @@ if [ -n "$KERNEL_VER" ]; then
     fi
 fi
 
-mkdir -p /boot/grub
+mkdir -p /boot/grub /boot/grub2
 cat > /boot/grub/grub.cfg <<EOF
 search --no-floppy --label --set=boot $BOOT_LABEL
-set prefix=(\$boot)/grub
-configfile (\$boot)/grub/grub.cfg
+set prefix=(\$boot)/grub2
+configfile (\$boot)/grub2/grub.cfg
 EOF
 
 if command -v pipa-refresh-grub-config >/dev/null 2>&1; then
@@ -95,10 +95,10 @@ install_pipa_efi() {
 
     # Modules needed to find the boot partition and load its grub.cfg
     local modules=(
-        all_video boot cat chain configfile echo ext2 fat gzio help
-        linux loadenv ls lsefi lsefimmap normal part_gpt part_msdos
-        reboot regexp search search_fs_file search_fs_uuid search_label
-        sleep test true
+        all_video boot cat chain configfile echo ext2 fat font gfxterm
+        gzio help jpeg linux loadenv ls lsefi lsefimmap normal part_gpt
+        part_msdos png reboot regexp search search_fs_file search_fs_uuid
+        search_label sleep test true
     )
 
     grub-mkimage \
@@ -142,18 +142,28 @@ install_pipa_efi() {
         cp -f "$mm" "$vendor_dir/$base"
     done
 
-    # Stub cfg: redirect to labeled boot partition's real grub.cfg
+    # Stub cfg: same as openSUSE-pipa (UUID first, then label, grub2).
     for dest in "$vendor_dir" "$boot_dir"; do
         cat > "$dest/grub.cfg" <<EOF
-search --no-floppy --label $BOOT_LABEL --set prefix
-if [ -d (\$prefix)/grub ]; then
-  set prefix=(\$prefix)/grub
+if [ -f \${config_directory}/bootuuid.cfg ]; then
+  source \${config_directory}/bootuuid.cfg
+fi
+if [ -n "\${BOOT_UUID}" ]; then
+  search --fs-uuid "\${BOOT_UUID}" --set prefix --no-floppy
+else
+  search --label $BOOT_LABEL --set prefix --no-floppy
+fi
+if [ -d (\$prefix)/grub2 ]; then
+  set prefix=(\$prefix)/grub2
   configfile \$prefix/grub.cfg
-elif [ -d (\$prefix)/boot/grub ]; then
-  set prefix=(\$prefix)/boot/grub
+else
+  set prefix=(\$prefix)/boot/grub2
   configfile \$prefix/grub.cfg
 fi
 boot
+EOF
+        cat > "$dest/bootuuid.cfg" <<'EOF'
+set BOOT_UUID=""
 EOF
     done
 

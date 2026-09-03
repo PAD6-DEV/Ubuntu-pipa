@@ -26,16 +26,32 @@ if [ ! -f "$RAW_IMAGE" ]; then
     exit 1
 fi
 
+write_uefi_csv() {
+    python3 - "$1" "$2" "$3" "$4" <<'PY'
+import pathlib, sys
+csv_path, entry_image, title, description = sys.argv[1:5]
+text = f"{entry_image},{title},,{description}\r\n"
+pathlib.Path(csv_path).write_bytes(b"\xff\xfe" + text.encode("utf-16le"))
+PY
+}
+
 mkdir -p "$OUTPUT_DIR"
 MNT=$(mktemp -d)
 BOOT_MNT=$(mktemp -d)
 ESP_MNT=$(mktemp -d)
+GRUB_ROOT_MNT=""
 
 cleanup() {
     umount "$MNT/boot" 2>/dev/null || true
     umount "$MNT" 2>/dev/null || true
     umount "$BOOT_MNT" 2>/dev/null || true
     umount "$ESP_MNT" 2>/dev/null || true
+    if [ -n "${GRUB_ROOT_MNT}" ]; then
+        umount "$GRUB_ROOT_MNT/proc" 2>/dev/null || true
+        umount "$GRUB_ROOT_MNT/boot" 2>/dev/null || true
+        umount "$GRUB_ROOT_MNT" 2>/dev/null || true
+        rmdir "$GRUB_ROOT_MNT" 2>/dev/null || true
+    fi
     rmdir "$MNT" "$BOOT_MNT" "$ESP_MNT" 2>/dev/null || true
     losetup -j "$RAW_IMAGE" | cut -d: -f1 | xargs -r losetup -d 2>/dev/null || true
 }
@@ -77,8 +93,8 @@ EOF
 mkdir -p "$ROOT_MNT/boot/grub"
 cat > "$ROOT_MNT/boot/grub/grub.cfg" <<EOF
 search --no-floppy --label --set=boot $BOOT_LABEL
-set prefix=(\$boot)/grub
-configfile (\$boot)/grub/grub.cfg
+set prefix=(\$boot)/grub2
+configfile (\$boot)/grub2/grub.cfg
 EOF
 
 umount "$ROOT_MNT"
@@ -125,7 +141,7 @@ else
     exit 1
 fi
 
-mkdir -p "$BOOT_MNT/dtbs/qcom" "$BOOT_MNT/grub"
+mkdir -p "$BOOT_MNT/dtbs/qcom" "$BOOT_MNT/grub2"
 shopt -s nullglob
 dtb_files=("$MNT/boot/dtbs/qcom"/sm8250-xiaomi-pipa*.dtb)
 shopt -u nullglob
@@ -141,22 +157,39 @@ cp "${dtb_files[@]}" "$BOOT_MNT/dtbs/qcom/"
 [ -f "$MNT/boot/System.map-$KERNEL_VER" ] && cp "$MNT/boot/System.map-$KERNEL_VER" "$BOOT_MNT/"
 [ -f "$MNT/boot/config-$KERNEL_VER" ] && cp "$MNT/boot/config-$KERNEL_VER" "$BOOT_MNT/"
 
-TARGET_KERNEL_CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 earlycon quiet splash clk_ignore_unused pd_ignore_unused"
+TARGET_KERNEL_CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 quiet splash clk_ignore_unused pd_ignore_unused"
 printf '%s\n' "$TARGET_KERNEL_CMDLINE" > "$BOOT_MNT/cmdline.txt"
 
-kernel_rel="Image"
-[ -f "$BOOT_MNT/Image" ] || kernel_rel="Image.gz"
-
-dtb_rels=()
-for dtb in "${dtb_files[@]}"; do
-    dtb_rels+=("dtbs/qcom/$(basename "$dtb")")
-done
-
-"$REPO_ROOT/scripts/write-pipa-grub-cfg.sh" \
-    "$BOOT_MNT/grub/grub.cfg" "$BOOT_LABEL" "$TARGET_KERNEL_CMDLINE" \
-    "$kernel_rel" "$INITRAMFS_STABLE" "${dtb_rels[@]}"
-
 umount "$BOOT_MNT"
+
+echo "=== Generating GRUB config (pipa-refresh-grub-config) ==="
+GRUB_ROOT_MNT=$(mktemp -d)
+mount -o loop "$OUTPUT_DIR/ubuntu_rootfs.raw" "$GRUB_ROOT_MNT"
+mkdir -p "$GRUB_ROOT_MNT/boot" "$GRUB_ROOT_MNT/proc"
+printf '%s\n' "$TARGET_KERNEL_CMDLINE" > "$GRUB_ROOT_MNT/etc/cmdline"
+mount -o loop "$OUTPUT_DIR/ubuntu_boot.raw" "$GRUB_ROOT_MNT/boot"
+mount -t proc proc "$GRUB_ROOT_MNT/proc"
+if [ ! -x "$GRUB_ROOT_MNT/usr/local/bin/pipa-refresh-grub-config" ]; then
+    echo "ERROR: pipa-refresh-grub-config missing from rootfs" >&2
+    exit 1
+fi
+PIPA_INITRAMFS_SOURCE="/boot/$INITRAMFS_STABLE" \
+    chroot "$GRUB_ROOT_MNT" /usr/local/bin/pipa-refresh-grub-config
+if [ ! -f "$GRUB_ROOT_MNT/boot/grub2/grub.cfg" ]; then
+    echo "ERROR: pipa-grub-config did not generate /boot/grub2/grub.cfg" >&2
+    exit 1
+fi
+umount "$GRUB_ROOT_MNT/proc"
+umount "$GRUB_ROOT_MNT/boot"
+umount "$GRUB_ROOT_MNT"
+rmdir "$GRUB_ROOT_MNT"
+GRUB_ROOT_MNT=""
+
+BOOT_FS_UUID="$(blkid -s UUID -o value "$OUTPUT_DIR/ubuntu_boot.raw")"
+if [ -z "$BOOT_FS_UUID" ]; then
+    echo "ERROR: unable to read UUID from ubuntu_boot.raw" >&2
+    exit 1
+fi
 
 echo "=== Creating ESP image ==="
 truncate -s 128M "$OUTPUT_DIR/ubuntu_esp.raw"
@@ -218,10 +251,10 @@ if [ ! -f "$ESP_MNT/EFI/ubuntu/grubaa64.efi" ]; then
             -O arm64-efi \
             -o "$ESP_MNT/EFI/ubuntu/grubaa64.efi" \
             -p /EFI/ubuntu \
-            all_video boot cat chain configfile echo ext2 fat gzio help \
-            linux loadenv ls lsefi lsefimmap normal part_gpt part_msdos \
-            reboot regexp search search_fs_file search_fs_uuid search_label \
-            sleep test true
+            all_video boot cat chain configfile echo ext2 fat font gfxterm \
+            gzio help jpeg linux loadenv ls lsefi lsefimmap normal part_gpt \
+            part_msdos png reboot regexp search search_fs_file search_fs_uuid \
+            search_label sleep test true
     elif [ -f "$MNT/usr/lib/grub/arm64-efi/monolithic/grubaa64.efi" ]; then
         cp -f "$MNT/usr/lib/grub/arm64-efi/monolithic/grubaa64.efi" \
             "$ESP_MNT/EFI/ubuntu/grubaa64.efi"
@@ -244,8 +277,12 @@ else
 fi
 cp -f "$ESP_MNT/EFI/ubuntu/grubaa64.efi" "$ESP_MNT/EFI/BOOT/grubaa64.efi"
 
-# Stub grub.cfg on ESP: redirect to labeled /boot partition
-for shim_vendor in ubuntu BOOT; do
+# Mu-Silicium / Endeavour early config also looks at EFI/fedora.
+mkdir -p "$ESP_MNT/EFI/fedora"
+cp -a "$ESP_MNT/EFI/ubuntu/." "$ESP_MNT/EFI/fedora/"
+
+# Stub grub.cfg on ESP: redirect to labeled /boot partition (same as openSUSE-pipa)
+for shim_vendor in ubuntu fedora BOOT; do
     mkdir -p "$ESP_MNT/EFI/$shim_vendor"
     cat > "$ESP_MNT/EFI/$shim_vendor/grub.cfg" <<ESPCFG
 if [ -f \${config_directory}/bootuuid.cfg ]; then
@@ -256,19 +293,21 @@ if [ -n "\${BOOT_UUID}" ]; then
 else
   search --label $BOOT_LABEL --set prefix --no-floppy
 fi
-if [ -d (\$prefix)/grub ]; then
-  set prefix=(\$prefix)/grub
+if [ -d (\$prefix)/grub2 ]; then
+  set prefix=(\$prefix)/grub2
   configfile \$prefix/grub.cfg
 else
-  set prefix=(\$prefix)/boot/grub
+  set prefix=(\$prefix)/boot/grub2
   configfile \$prefix/grub.cfg
 fi
 boot
 ESPCFG
     cat > "$ESP_MNT/EFI/$shim_vendor/bootuuid.cfg" <<UUIDCFG
-set BOOT_UUID=""
+set BOOT_UUID="$BOOT_FS_UUID"
 UUIDCFG
 done
+write_uefi_csv "$ESP_MNT/EFI/ubuntu/BOOTAA64.CSV" "shimaa64.efi" "Ubuntu" "Ubuntu Pipa"
+write_uefi_csv "$ESP_MNT/EFI/fedora/BOOTAA64.CSV" "shimaa64.efi" "Ubuntu" "Ubuntu Pipa"
 
 echo "=== ESP contents ==="
 find "$ESP_MNT" -type f -printf '%p (%s)\n' | sort

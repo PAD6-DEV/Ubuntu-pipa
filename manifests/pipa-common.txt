@@ -4,6 +4,7 @@ linux-image-pipa
 linux-modules-pipa
 xiaomi-pipa-firmware
 linux-firmware
+pipa-grub-config
 grub-efi-arm64
 shim-signed
 dracut

@@ -50,13 +50,20 @@ fi
 [ -d /usr/share/plymouth/themes/spinner ] || fail "plymouth spinner theme missing"
 [ -f /etc/cloud/cloud-init.disabled ] || fail "cloud-init not disabled"
 systemctl get-default 2>/dev/null | grep -q graphical.target || fail "default target is not graphical"
-if [ -f /etc/gdm3/custom.conf ] || [ -L /etc/systemd/system/display-manager.service ]; then
-    for pam in /etc/pam.d/gdm-autologin /etc/pam.d/gdm-password; do
-        if [ -f "$pam" ] && grep -q 'pam_succeed_if.so user != root' "$pam"; then
-            fail "$pam still blocks root autologin"
-        fi
-    done
-    ok "gdm root autologin pam"
+if [ -f /etc/gdm3/custom.conf ]; then
+    dpkg -l gnome-initial-setup 2>/dev/null | grep -q '^ii' \
+        || fail "gnome-initial-setup is not installed"
+    grep -q '^InitialSetupEnable=True' /etc/gdm3/custom.conf \
+        || fail "GDM InitialSetupEnable is not True"
+    grep -q '^AutomaticLogin=root' /etc/gdm3/custom.conf \
+        && fail "GDM still autologins as root instead of gnome-initial-setup"
+    [ ! -f /root/.config/autostart/pipa-firstboot-setup.desktop ] \
+        || fail "pipa firstboot wizard is still installed for GNOME"
+    [ ! -f /var/lib/pipa-firstboot/needs-setup ] \
+        || fail "pipa firstboot sentinel still present for GNOME"
+    [ -x /usr/libexec/gnome-initial-setup ] \
+        || fail "gnome-initial-setup binary missing"
+    ok "gdm gnome-initial-setup"
 fi
 if [ -f /etc/sddm.conf.d/10-firstboot-autologin.conf ]; then
     grep -q '^User=root' /etc/sddm.conf.d/10-firstboot-autologin.conf \

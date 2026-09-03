@@ -104,7 +104,5 @@ in a fastboot loop.
 
 ## First boot
 
-Root should autologin once into Plasma/GNOME (`root` / `root`). If you land on
-the login screen instead, type user `root` and password `root`. A zenity/kdialog
-wizard then creates your user (sudo group), sets hostname, and reboots to the
-normal login screen.
+- **GNOME:** GDM runs `gnome-initial-setup` (create your user). Root password is `root` for SSH/recovery.
+- **Plasma:** root autologins once (`root` / `root`), shows a create-user dialog, then reboots to the normal login screen.

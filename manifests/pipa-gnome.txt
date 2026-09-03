@@ -1,7 +1,7 @@
 # GNOME desktop variant
 ubuntu-desktop
 gdm3
-zenity
+gnome-initial-setup
 firefox
 libreoffice-writer
 libreoffice-calc
