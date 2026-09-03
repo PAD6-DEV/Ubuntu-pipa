@@ -47,6 +47,8 @@ cleanup() {
     umount "$BOOT_MNT" 2>/dev/null || true
     umount "$ESP_MNT" 2>/dev/null || true
     if [ -n "${GRUB_ROOT_MNT}" ]; then
+        umount "$GRUB_ROOT_MNT/dev/pts" 2>/dev/null || true
+        umount "$GRUB_ROOT_MNT/dev" 2>/dev/null || true
         umount "$GRUB_ROOT_MNT/proc" 2>/dev/null || true
         umount "$GRUB_ROOT_MNT/boot" 2>/dev/null || true
         umount "$GRUB_ROOT_MNT" 2>/dev/null || true
@@ -165,10 +167,12 @@ umount "$BOOT_MNT"
 echo "=== Generating GRUB config (pipa-refresh-grub-config) ==="
 GRUB_ROOT_MNT=$(mktemp -d)
 mount -o loop "$OUTPUT_DIR/ubuntu_rootfs.raw" "$GRUB_ROOT_MNT"
-mkdir -p "$GRUB_ROOT_MNT/boot" "$GRUB_ROOT_MNT/proc"
+mkdir -p "$GRUB_ROOT_MNT/boot" "$GRUB_ROOT_MNT/proc" "$GRUB_ROOT_MNT/dev" "$GRUB_ROOT_MNT/dev/pts"
 printf '%s\n' "$TARGET_KERNEL_CMDLINE" > "$GRUB_ROOT_MNT/etc/cmdline"
 mount -o loop "$OUTPUT_DIR/ubuntu_boot.raw" "$GRUB_ROOT_MNT/boot"
 mount -t proc proc "$GRUB_ROOT_MNT/proc"
+mount --bind /dev "$GRUB_ROOT_MNT/dev"
+mount --bind /dev/pts "$GRUB_ROOT_MNT/dev/pts"
 if [ ! -x "$GRUB_ROOT_MNT/usr/local/bin/pipa-refresh-grub-config" ]; then
     echo "ERROR: pipa-refresh-grub-config missing from rootfs" >&2
     exit 1
@@ -179,6 +183,8 @@ if [ ! -f "$GRUB_ROOT_MNT/boot/grub2/grub.cfg" ]; then
     echo "ERROR: pipa-grub-config did not generate /boot/grub2/grub.cfg" >&2
     exit 1
 fi
+umount "$GRUB_ROOT_MNT/dev/pts"
+umount "$GRUB_ROOT_MNT/dev"
 umount "$GRUB_ROOT_MNT/proc"
 umount "$GRUB_ROOT_MNT/boot"
 umount "$GRUB_ROOT_MNT"
